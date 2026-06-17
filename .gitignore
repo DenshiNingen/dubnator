@@ -1,0 +1,28 @@
+# dependencies / build output
+node_modules/
+.pnpm-store/
+dist/
+.next/
+.turbo/
+out/
+
+# logs / OS / editors
+*.log
+.DS_Store
+.vercel/
+*.tsbuildinfo
+
+# Tauri build artifacts
+apps/studio/src-tauri/target/
+apps/studio/src-tauri/gen/
+
+# ─────────────────────────────────────────────────────────────
+# Local-only — kept on this machine, never pushed to the public repo.
+# (planning notes, reference material, scratch scripts, agent memory)
+# ─────────────────────────────────────────────────────────────
+local/
+.claude/
+*.bundle
+check_connections.mjs
+test_pickup_bug.mjs
+test_robotic_wow_bug.mjs

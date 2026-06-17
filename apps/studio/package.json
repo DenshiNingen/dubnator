@@ -1,0 +1,24 @@
+{
+  "name": "@dubnator/studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Dubnator Mk-1 — brutalist dub FX rack",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs --serve",
+    "test": "node tests/engine.test.mjs && node tests/recorder.test.mjs && node tests/midi.test.mjs",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "jszip": "3.10.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.1.0",
+    "esbuild": "^0.24.0"
+  }
+}

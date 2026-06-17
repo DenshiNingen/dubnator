@@ -1,0 +1,133 @@
+@import "tailwindcss";
+
+/* ------------------------------------------------------------------ */
+/*  Dubnator design tokens — CSS-first Tailwind v4 (@theme)            */
+/*  Dark "hardware rack" / brutalist-but-refined. Hot dub orange.     */
+/* ------------------------------------------------------------------ */
+@theme {
+  /* surfaces */
+  --color-bg: #0a0a0b; /* page */
+  --color-panel: #14161b; /* rack panel */
+  --color-panel-2: #1c1f27; /* raised panel */
+  --color-line: #2a2e38; /* 1px borders */
+
+  /* type */
+  --color-text: #ececec;
+  --color-muted: #8b919c;
+
+  /* accents */
+  --color-accent: #ff5a28; /* primary — dub orange */
+  --color-accent-2: #ffb020; /* amber — sparing */
+
+  /* fonts — mapped to next/font CSS vars */
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular,
+    Menlo, monospace;
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Base                                                              */
+/* ------------------------------------------------------------------ */
+html {
+  scroll-behavior: smooth;
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* selection — hot orange on near-black */
+::selection {
+  background: var(--color-accent);
+  color: #0a0a0b;
+}
+
+/* thin custom scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 9999px;
+  border: 2px solid var(--color-bg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3f4b;
+}
+
+/* visible focus rings for keyboard users */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Utilities — faint rack texture (grid + scanlines + radial glow)   */
+/* ------------------------------------------------------------------ */
+@utility bg-grid {
+  background-image:
+    linear-gradient(to right, var(--color-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--color-line) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+@utility bg-grid-fade {
+  background-image:
+    linear-gradient(
+      to right,
+      color-mix(in srgb, var(--color-line) 60%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--color-line) 60%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 48px 48px;
+  -webkit-mask-image: radial-gradient(
+    ellipse 80% 60% at 50% 0%,
+    #000 35%,
+    transparent 75%
+  );
+  mask-image: radial-gradient(
+    ellipse 80% 60% at 50% 0%,
+    #000 35%,
+    transparent 75%
+  );
+}
+
+@utility bg-scanlines {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 2px,
+    rgba(0, 0, 0, 0.35) 2px,
+    rgba(0, 0, 0, 0.35) 3px
+  );
+}
+
+@utility bg-glow {
+  background-image: radial-gradient(
+    60% 50% at 50% 0%,
+    color-mix(in srgb, var(--color-accent) 18%, transparent) 0%,
+    transparent 70%
+  );
+}
+
+/* inner highlight along the top edge — gives panels a "rack unit" feel */
+@utility panel-sheen {
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.04);
+}

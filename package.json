@@ -1,0 +1,21 @@
+{
+  "name": "dubnator-monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Dubnator — a browser-based dub/reggae FX rack & channel strip, with a downloadable desktop app.",
+  "packageManager": "pnpm@9.15.4",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "studio": "pnpm --filter @dubnator/studio dev",
+    "web": "pnpm --filter @dubnator/web dev"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.3"
+  }
+}
