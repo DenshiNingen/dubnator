@@ -16,6 +16,10 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
+# Native MIDI input: WKWebView (macOS) and WebKitGTK (Linux) have no Web MIDI,
+# so the desktop app reads controllers via CoreMIDI/ALSA/WinMM through midir
+# and forwards raw messages to the webview as "midi" events.
+midir = "0.10"
 serde_json = "1"
 
 [profile.release]

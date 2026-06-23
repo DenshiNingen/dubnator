@@ -73,7 +73,7 @@ async function rewriteHtml() {
   // would serve stale assets during `--serve` watch development.
   const withSw = SERVE ? out : out.replace(
     /<\/body>/,
-    `  <script>\n    if ("serviceWorker" in navigator) {\n      window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));\n    }\n  </script>\n</body>`,
+    `  <script>\n    if ("serviceWorker" in navigator && !window.__TAURI_INTERNALS__) {\n      window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));\n    }\n  </script>\n</body>`,
   );
   await writeFile(join(DIST, "index.html"), withSw);
   await writeFile(join(DIST, "Dubnator.html"), withSw);

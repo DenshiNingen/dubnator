@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- macOS TCC: required for getUserMedia / enumerateDevices (mic + line inputs)
+       to work and show device labels inside the WKWebView. Tauri v2 auto-merges
+       this file into the generated app bundle's Info.plist. -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Dubnator captures microphone, line and multichannel inputs into the FX rack.</string>
+</dict>
+</plist>

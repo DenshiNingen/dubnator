@@ -1341,6 +1341,19 @@ function App() {
   // engine init on first interaction
   const [ready, setReady] = useState(false);
   const init = async () => { await eng.init(); setReady(true); };
+  // Browser/WebView autoplay policy forbids starting audio without a user gesture,
+  // so engage the engine on the very first interaction anywhere (pointer or key) —
+  // the user no longer has to think about "click to engage".
+  useEffect(() => {
+    if (ready) return;
+    const engage = () => { init(); };
+    window.addEventListener("pointerdown", engage, { once: true });
+    window.addEventListener("keydown", engage, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", engage);
+      window.removeEventListener("keydown", engage);
+    };
+  }, [ready]);
 
   // === decks ===
   const [deckA, setDeckA] = useState({ name: "—", time: 0, dur: 0, playing: false, gain: 0.85, pan: 0, mute: false, autoGain: false, rewindLen: 4, playlist: [], playlistIdx: 0, cued: false, loopOn: false, loopIn: 0 });
@@ -1743,9 +1756,12 @@ function App() {
   const stopA = () => eng.deckA && eng.deckA.stop();
   const stopB = () => eng.deckB && eng.deckB.stop();
 
-  const triggerSample = async (i) => {
-    await init();
-    eng.samples.play(i, sampleFx.hold); // hold mode → momentary loop until release
+  const triggerSample = (i) => {
+    // Fire the sound synchronously inside the key/pointer handler when the engine
+    // is already engaged (no await → no microtask delay). Only the very first
+    // gesture pays the init() cost and plays once it resolves.
+    if (eng.ctx && eng.samples) eng.samples.play(i, sampleFx.hold); // hold mode → momentary loop until release
+    else init().then(() => { if (eng.samples) eng.samples.play(i, sampleFx.hold); });
     setSelectedSample(i); // the fired slot becomes the selection (kept after the flash clears)
     setFlashIdx(i);
     if (!sampleFx.hold) setTimeout(() => setFlashIdx((cur) => (cur === i ? -1 : cur)), 180);
@@ -1756,9 +1772,9 @@ function App() {
     setFlashIdx((cur) => (cur === i ? -1 : cur));
   };
 
-  const triggerSirenDown = async () => {
-    await init();
-    eng.siren.triggerOn();
+  const triggerSirenDown = () => {
+    if (eng.ctx && eng.siren) eng.siren.triggerOn();
+    else init().then(() => { if (eng.siren) eng.siren.triggerOn(); });
     setSirenHeld(true);
   };
   const triggerSirenUp = () => {
@@ -1767,9 +1783,9 @@ function App() {
     setSirenHeld(false);
   };
   // legacy short pulse for keyboard
-  const triggerSiren = async () => {
-    await init();
-    eng.siren.trigger(800);
+  const triggerSiren = () => {
+    if (eng.ctx && eng.siren) eng.siren.trigger(800);
+    else init().then(() => { if (eng.siren) eng.siren.trigger(800); });
   };
 
   // tap tempo for echo
@@ -2029,11 +2045,27 @@ function App() {
     const m = mapperRef.current; if (!m) return;
     setMidiErr("");
     try {
+      // Desktop (Tauri): WKWebView/WebKitGTK have no Web MIDI, so controllers come
+      // from the native Rust bridge as "midi" events with raw [status,d1,d2] bytes.
+      const tauri = typeof window !== "undefined" && window.__TAURI__;
+      if (tauri) {
+        if (!window.__dubMidiBridge) {
+          window.__dubMidiBridge = await tauri.event.listen("midi", (e) => {
+            const mp = mapperRef.current;
+            if (mp) mp.handleMessage(e.payload);
+          });
+        }
+        const names = await tauri.core.invoke("connect_midi");
+        setMidiInputs(names);
+        midiConnectedRef.current = true;
+        if (!names.length) setMidiErr("No MIDI inputs detected. Connect a controller and retry.");
+        return;
+      }
       const names = await m.connectWebMidi();
       setMidiInputs(names);
       midiConnectedRef.current = true;
       if (!names.length) setMidiErr("No MIDI inputs detected. Connect a controller and retry.");
-    } catch (e) { setMidiErr(e && e.message ? e.message : "Web MIDI unavailable"); }
+    } catch (e) { setMidiErr(e && e.message ? e.message : "MIDI unavailable"); }
   };
   // Current 0..1 value of each MIDI control (inverse of the H setters), used to
   // seed pickup so a physical knob doesn't jump the software value on first move.
@@ -2517,6 +2549,14 @@ function App() {
     // can't show a device the audio isn't routed to.
     try { await eng.setOutputDevice(id || undefined); setOutDeviceId(id); } catch (_) {}
   };
+  const scanOutputs = async () => {
+    // WebKit lists output devices with IDs/labels only after a mic grant.
+    try {
+      if (eng.ensureOutputPermission) await eng.ensureOutputPermission();
+      const list = await eng.listOutputDevices();
+      setOutDevices(list);
+    } catch (_) {}
+  };
   const [lineOn, setLineOn] = useState(false);
   const [lineErr, setLineErr] = useState("");
   const toggleLine = async () => {
@@ -2672,7 +2712,9 @@ function App() {
         <div className="brand-meta">
           <span>SR 48 KHZ</span>
           <span>BUF 256</span>
-          <span style={{ color: ready ? "var(--green)" : "var(--text-dim)" }}>
+          <span style={{ color: ready ? "var(--green)" : "var(--text-dim)", cursor: ready ? "default" : "pointer" }}
+            onClick={() => { if (!ready) init(); }}
+            title={ready ? "Audio engine running" : "Click to start the audio engine"}>
             {ready ? "● ENGINE ONLINE" : "○ CLICK TO ENGAGE"}
           </span>
           <button className="btn-xs btn help-btn" onClick={toggleFullscreen} title="Toggle full screen">
@@ -2912,17 +2954,22 @@ function App() {
                   onClick={() => setView({ hue: 0, darkness: 0 })}>RESET VIEW</button>
               ) : null}
               </>)}
-              {outDevices.length > 0 && (
+              {ready && eng.canSetOutput && eng.canSetOutput() && (
                 <>
                   <div className="setup-divider" style={{ marginTop: 4 }}></div>
                   <div className="section-label">OUTPUT</div>
-                  <select className="mic-device-select mono" value={outDeviceId}
-                    onChange={(e) => onPickOutput(e.target.value)} title="Master output device">
-                    <option value="">System default</option>
-                    {outDevices.filter((d) => d.deviceId && d.deviceId !== "default").map((d) => (
-                      <option key={d.deviceId} value={d.deviceId}>{d.label}</option>
-                    ))}
-                  </select>
+                  {outDevices.filter((d) => d.deviceId && d.deviceId !== "default").length > 0 ? (
+                    <select className="mic-device-select mono" value={outDeviceId}
+                      onChange={(e) => onPickOutput(e.target.value)} title="Master output device">
+                      <option value="">System default</option>
+                      {outDevices.filter((d) => d.deviceId && d.deviceId !== "default").map((d) => (
+                        <option key={d.deviceId} value={d.deviceId}>{d.label}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <button className="btn-xs btn" onClick={scanOutputs}
+                      title="Detect audio output devices — macOS requires microphone permission to list devices">DETECT DEVICES</button>
+                  )}
                 </>
               )}
             </div>

@@ -930,7 +930,9 @@
 
     async init() {
       if (this.ctx) return;
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      // latencyHint "interactive" = lowest output latency (snappier key-to-sound,
+      // matters most in the Tauri/WKWebView build whose Core Audio buffer is larger).
+      const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
       this.ctx = ctx;
 
       this.deckA = new Deck(ctx, "A");
@@ -1662,13 +1664,69 @@
       return devices.filter((d) => d.kind === "audiooutput")
         .map((d, i) => ({ deviceId: d.deviceId, label: d.label || `Output ${i + 1}` }));
     }
-    canSetOutput() { return !!(this.ctx && typeof this.ctx.setSinkId === "function"); }
-    // Route the master output to a chosen device (AudioContext.setSinkId, Chromium).
+    canSetOutput() {
+      // Chromium: AudioContext.setSinkId routes the whole graph directly.
+      if (this.ctx && typeof this.ctx.setSinkId === "function") return true;
+      // WebKit (Tauri/macOS, no AudioContext.setSinkId): route the graph through a
+      // MediaStreamDestination -> <audio> element and use HTMLMediaElement.setSinkId
+      // (supported since Safari 18.4 / macOS 15.4).
+      return typeof HTMLMediaElement !== "undefined" && "setSinkId" in HTMLMediaElement.prototype;
+    }
+    // WebKit only exposes audiooutput device IDs/labels after a getUserMedia grant.
+    // Request it once (then stop the tracks — we only need the permission).
+    async ensureOutputPermission() {
+      if (this._micStream || this._devicePermGranted) return true;
+      const md = (typeof navigator !== "undefined") && navigator.mediaDevices;
+      if (!md || !md.getUserMedia) return false;
+      try {
+        const s = await md.getUserMedia({ audio: true });
+        s.getTracks().forEach((t) => t.stop());
+        this._devicePermGranted = true;
+        return true;
+      } catch (_) { return false; }
+    }
+    // Route the master output to a chosen device. Chromium uses AudioContext.setSinkId;
+    // WebKit falls back to a MediaStreamDestination -> <audio>.setSinkId branch, engaged
+    // only for a non-default device (the default path stays a direct, low-latency
+    // masterGain -> ctx.destination connection).
     async setOutputDevice(deviceId) {
-      if (!this.canSetOutput()) throw new Error("Output device selection not supported here");
-      await this.ctx.setSinkId(deviceId || "");
-      this._outputDeviceId = deviceId || "";
-      return this._outputDeviceId;
+      const id = deviceId || "";
+      if (this.ctx && typeof this.ctx.setSinkId === "function") {
+        await this.ctx.setSinkId(id);
+        this._outputDeviceId = id;
+        return id;
+      }
+      if (!(typeof HTMLMediaElement !== "undefined" && "setSinkId" in HTMLMediaElement.prototype)) {
+        throw new Error("Output device selection not supported here");
+      }
+      if (!id) { this._teardownElementOutput(); this._outputDeviceId = ""; return ""; }
+      this._setupElementOutput();
+      try { await this.ctx.resume(); } catch (_) {}   // CRITICAL on WebKit, else the stream is silent
+      try { await this._outEl.play(); } catch (_) {}
+      await this._outEl.setSinkId(id);
+      this._outputDeviceId = id;
+      return id;
+    }
+    _setupElementOutput() {
+      if (this._outStreamDest) return;
+      this._outStreamDest = this.ctx.createMediaStreamDestination();
+      try { this.masterGain.disconnect(this.ctx.destination); } catch (_) {}
+      this.masterGain.connect(this._outStreamDest);
+      const el = new Audio();
+      el.srcObject = this._outStreamDest.stream;
+      el.style.display = "none";
+      // Attach to the DOM + keep a reference so WebKit doesn't GC / silence it.
+      if (typeof document !== "undefined" && document.body) document.body.appendChild(el);
+      this._outEl = el;
+    }
+    _teardownElementOutput() {
+      if (!this._outStreamDest) return;
+      try { this._outEl && this._outEl.pause(); } catch (_) {}
+      try { this.masterGain.disconnect(this._outStreamDest); } catch (_) {}
+      try { this.masterGain.connect(this.ctx.destination); } catch (_) {} // restore low-latency direct out
+      if (this._outEl && this._outEl.parentNode) this._outEl.parentNode.removeChild(this._outEl);
+      this._outEl = null;
+      this._outStreamDest = null;
     }
     outputDeviceId() { return this._outputDeviceId || ""; }
     // Pure Sub-Bass: on → steep LP at `hz` (default 110); off → transparent.

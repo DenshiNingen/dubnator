@@ -59,6 +59,7 @@ jobs:
             build-essential \
             libssl-dev \
             libxdo-dev \
+            libasound2-dev \
             libayatana-appindicator3-dev
 
       - name: Setup pnpm
