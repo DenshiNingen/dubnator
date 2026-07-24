@@ -1,18 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { JetBrains_Mono, Geist } from "next/font/google";
 import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-  display: "swap",
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  variable: "--font-jetbrains-mono",
-  subsets: ["latin"],
-  display: "swap",
-});
 
 const SITE_URL = "https://dubnator.denshi.io";
 const TITLE =
@@ -80,10 +67,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${jetbrainsMono.variable} dark h-full antialiased`}
-    >
+    <html lang="en" className="dark h-full antialiased">
       <body className="min-h-full bg-bg font-sans text-text flex flex-col">
         {children}
       </body>

@@ -9,8 +9,8 @@ const REPO_URL = "https://github.com/DenshiNingen/dubnator";
 
 const NAV_LINKS = [
   { href: "#features", label: "Features" },
-  { href: "#fx", label: "FX" },
-  { href: "#demo", label: "Session" },
+  { href: "#for-the-dance", label: "Culture" },
+  { href: "#live-demo", label: "Session" },
   { href: "#download", label: "Download" },
 ] as const;
 

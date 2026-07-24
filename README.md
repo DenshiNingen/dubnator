@@ -27,6 +27,14 @@ dubnator/
 
 Tooling: **pnpm** workspaces + **Turborepo**. Node ≥ 20.
 
+The studio keeps its compatibility-facing browser globals while separating the
+main concerns into focused sources: `audio-codecs.js` owns AIFF/WAV parsing and
+encoding, `audio-engine.js` owns the Web Audio graph, and the JSX files own
+controls, floating windows, playlists, the keyboard map and the main rack UI.
+The MIDI catalog is data-only in `midi-controls.js`. Production builds vendor
+all runtime dependencies and generate a content-versioned offline service
+worker; neither app requires a font CDN.
+
 ## Quick start
 
 ```bash
@@ -38,15 +46,22 @@ pnpm web                       # run the site  → http://localhost:3000
 
 pnpm build                     # build everything (turbo)
 pnpm test                      # run the studio test suite
+pnpm lint                      # lint both applications
 ```
 
 Per-app:
 
 ```bash
 pnpm --filter @dubnator/studio dev      # app dev server (watch + live reload)
-pnpm --filter @dubnator/studio test     # audio-engine / recorder / midi tests
+pnpm --filter @dubnator/studio build
+pnpm --filter @dubnator/studio test     # engine / recorder / MIDI / PWA tests
 pnpm --filter @dubnator/studio tauri:build   # build the desktop app locally (needs Rust)
 ```
+
+`pnpm test` builds first, then checks the studio engine, codecs, MIDI and keyboard
+mapping, validates the generated PWA shell, and smoke-tests the statically
+rendered marketing site. CI additionally runs `cargo fmt --check` and
+`cargo check --locked` for the native shell.
 
 ## The rack
 

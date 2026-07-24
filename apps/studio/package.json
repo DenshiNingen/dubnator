@@ -7,7 +7,8 @@
   "scripts": {
     "build": "node build.mjs",
     "dev": "node build.mjs --serve",
-    "test": "node tests/engine.test.mjs && node tests/recorder.test.mjs && node tests/midi.test.mjs",
+    "test": "node --test tests/build.test.mjs tests/keyboard.test.mjs && node tests/engine.test.mjs && node tests/recorder.test.mjs && node tests/midi.test.mjs",
+    "lint": "eslint .",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
@@ -19,6 +20,8 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.1.0",
-    "esbuild": "^0.24.0"
+    "esbuild": "^0.24.0",
+    "eslint": "^9.39.4",
+    "globals": "^16.4.0"
   }
 }

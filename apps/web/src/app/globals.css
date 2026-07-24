@@ -19,10 +19,11 @@
   --color-accent: #ff5a28; /* primary — dub orange */
   --color-accent-2: #ffb020; /* amber — sparing */
 
-  /* fonts — mapped to next/font CSS vars */
-  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular,
-    Menlo, monospace;
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  /* Offline-safe system stacks: builds and page rendering require no font CDN. */
+  --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Code", "Roboto Mono",
+    Menlo, Consolas, monospace;
+  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Helvetica, Arial, sans-serif;
 }
 
 /* ------------------------------------------------------------------ */

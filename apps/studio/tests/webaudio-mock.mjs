@@ -101,7 +101,10 @@ import vm from "node:vm";
 
 export async function loadEngine() {
   const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-  const code = await readFile(join(ROOT, "audio-engine.js"), "utf8");
+  const [codecs, engine] = await Promise.all([
+    readFile(join(ROOT, "audio-codecs.js"), "utf8"),
+    readFile(join(ROOT, "audio-engine.js"), "utf8"),
+  ]);
   const win = { AudioContext: MockAudioContext, webkitAudioContext: MockAudioContext };
   const sandbox = {
     window: win,
@@ -114,7 +117,8 @@ export async function loadEngine() {
   };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
-  vm.runInContext(code, sandbox, { filename: "audio-engine.js" });
+  vm.runInContext(codecs, sandbox, { filename: "audio-codecs.js" });
+  vm.runInContext(engine, sandbox, { filename: "audio-engine.js" });
   return { win, MockAudioContext };
 }
 

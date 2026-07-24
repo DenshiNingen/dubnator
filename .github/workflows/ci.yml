@@ -33,8 +33,38 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build
-        run: pnpm build
+      - name: Lint
+        run: pnpm lint
 
-      - name: Test
+      - name: Build & test
         run: pnpm test
+
+  native-check:
+    name: Native Check
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libxdo-dev \
+            libasound2-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry & target
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/studio/src-tauri
+
+      - name: Check native shell
+        run: |
+          cargo fmt --check --manifest-path apps/studio/src-tauri/Cargo.toml
+          cargo check --locked --manifest-path apps/studio/src-tauri/Cargo.toml

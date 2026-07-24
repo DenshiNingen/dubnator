@@ -1,7 +1,7 @@
 // Build pipeline for Dubnator.
 // - Pre-compiles JSX → JS with esbuild (so the runtime no longer needs Babel)
 // - Vendors React, ReactDOM, JSZip from node_modules into dist/vendor/
-// - Rewrites Dubnator.html to use local vendored deps and compiled scripts
+// - Versions every local asset referenced by the HTML template
 // - Outputs dist/index.html (Tauri's default entry) plus dist/Dubnator.html
 // `node build.mjs --serve` watches sources and serves dist/ on :1420 for Tauri dev.
 
@@ -24,8 +24,23 @@ const DIST = join(ROOT, "dist");
 const VENDOR = join(DIST, "vendor");
 const SERVE = process.argv.includes("--serve");
 
-const JSX_ENTRIES = ["controls.jsx", "tweaks-panel.jsx", "app.jsx"];
-const STATIC_FILES = ["audio-engine.js", "midi.js", "styles.css"];
+const JSX_ENTRIES = [
+  "controls.jsx",
+  "tweaks-panel.jsx",
+  "floating-window.jsx",
+  "keyboard-map.jsx",
+  "playlist-modal.jsx",
+  "app.jsx",
+];
+const STATIC_FILES = [
+  "audio-codecs.js",
+  "audio-engine.js",
+  "bootstrap.js",
+  "midi.js",
+  "midi-controls.js",
+  "register-sw.js",
+  "styles.css",
+];
 const VENDOR_MAP = {
   "node_modules/react/umd/react.production.min.js": "react.min.js",
   "node_modules/react-dom/umd/react-dom.production.min.js": "react-dom.min.js",
@@ -34,8 +49,14 @@ const VENDOR_MAP = {
 
 async function rewriteHtml() {
   const src = await readFile(join(ROOT, "Dubnator.html"), "utf8");
-  const [cssV, audioV, midiV] = await Promise.all([
-    assetHash("styles.css"), assetHash("audio-engine.js"), assetHash("midi.js"),
+  const [cssV, codecsV, audioV, bootstrapV, midiV, midiControlsV, registerSwV] = await Promise.all([
+    assetHash("styles.css"),
+    assetHash("audio-codecs.js"),
+    assetHash("audio-engine.js"),
+    assetHash("bootstrap.js"),
+    assetHash("midi.js"),
+    assetHash("midi-controls.js"),
+    assetHash("register-sw.js"),
   ]);
   // Compiled JS lives in DIST (esbuild output), so hash those, not the .jsx.
   const jsHashes = {};
@@ -43,40 +64,47 @@ async function rewriteHtml() {
     const name = entry.replace(/\.jsx$/, "");
     jsHashes[name] = await assetHash(`${name}.js`, DIST);
   }
-  const out = src
-    .replace(/styles\.css\?v=\d+/g, `styles.css?v=${cssV}`)
-    .replace(/audio-engine\.js\?v=\d+/g, `audio-engine.js?v=${audioV}`)
-    .replace(/midi\.js\?v=\d+/g, `midi.js?v=${midiV}`)
-    .replace(
-      /<script src="https:\/\/unpkg\.com\/react@[^"]+"[^>]*><\/script>\s*/,
-      `<script src="vendor/react.min.js"></script>\n  `,
-    )
-    .replace(
-      /<script src="https:\/\/unpkg\.com\/react-dom@[^"]+"[^>]*><\/script>\s*/,
-      `<script src="vendor/react-dom.min.js"></script>\n  `,
-    )
-    .replace(/<script src="https:\/\/unpkg\.com\/@babel\/standalone[^"]+"[^>]*><\/script>\s*/, "")
-    .replace(
-      /<script src="https:\/\/unpkg\.com\/jszip[^"]+"[^>]*><\/script>\s*/,
-      `<script src="vendor/jszip.min.js"></script>\n  `,
-    )
-    .replace(
-      /<script type="text\/babel" src="([^"]+?)\.jsx(?:\?v=\d+)?"><\/script>/g,
-      (_, name) => `<script src="${name}.js?v=${jsHashes[name] || "0"}"></script>`,
-    )
-    // PWA: web manifest + theme colour in <head> (harmless in dev).
-    .replace(
-      /<\/head>/,
-      `  <link rel="manifest" href="manifest.webmanifest" />\n  <meta name="theme-color" content="#0a0a0a" />\n  <link rel="apple-touch-icon" href="icon-256.png" />\n</head>`,
-    );
+  let out = src
+    .replaceAll("styles.css?v=0", `styles.css?v=${cssV}`)
+    .replaceAll("audio-codecs.js?v=0", `audio-codecs.js?v=${codecsV}`)
+    .replaceAll("audio-engine.js?v=0", `audio-engine.js?v=${audioV}`)
+    .replaceAll("bootstrap.js?v=0", `bootstrap.js?v=${bootstrapV}`)
+    .replaceAll("midi.js?v=0", `midi.js?v=${midiV}`)
+    .replaceAll("midi-controls.js?v=0", `midi-controls.js?v=${midiControlsV}`);
+  for (const entry of JSX_ENTRIES) {
+    const name = entry.replace(/\.jsx$/, "");
+    out = out.replaceAll(`${name}.js?v=0`, `${name}.js?v=${jsHashes[name]}`);
+  }
+  // PWA metadata is injected into both generated entry points.
+  out = out.replace(
+    /<\/head>/,
+    `  <link rel="manifest" href="manifest.webmanifest" />\n  <meta name="theme-color" content="#0a0a0a" />\n  <link rel="apple-touch-icon" href="icon-256.png" />\n</head>`,
+  );
   // Register the service worker only in production builds; a cache-first SW
   // would serve stale assets during `--serve` watch development.
   const withSw = SERVE ? out : out.replace(
     /<\/body>/,
-    `  <script>\n    if ("serviceWorker" in navigator && !window.__TAURI_INTERNALS__) {\n      window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));\n    }\n  </script>\n</body>`,
+    `  <script src="register-sw.js?v=${registerSwV}"></script>\n</body>`,
   );
   await writeFile(join(DIST, "index.html"), withSw);
   await writeFile(join(DIST, "Dubnator.html"), withSw);
+  return [
+    "index.html",
+    `styles.css?v=${cssV}`,
+    `audio-codecs.js?v=${codecsV}`,
+    `audio-engine.js?v=${audioV}`,
+    `bootstrap.js?v=${bootstrapV}`,
+    `midi.js?v=${midiV}`,
+    `midi-controls.js?v=${midiControlsV}`,
+    `register-sw.js?v=${registerSwV}`,
+    ...JSX_ENTRIES.map((entry) => {
+      const name = entry.replace(/\.jsx$/, "");
+      return `${name}.js?v=${jsHashes[name]}`;
+    }),
+    ...Object.values(VENDOR_MAP).map((name) => `vendor/${name}`),
+    ...PWA_FILES,
+    ...Object.values(ICON_MAP),
+  ];
 }
 
 // PWA assets: web manifest + icons always; the service worker only in
@@ -101,9 +129,24 @@ async function copyStatic() {
   for (const [src, name] of Object.entries(ICON_MAP)) {
     await copyFile(join(ROOT, src), join(DIST, name));
   }
-  if (!SERVE) {
-    await copyFile(join(ROOT, "sw.js"), join(DIST, "sw.js"));
+}
+
+async function writeServiceWorker(shell) {
+  const digest = createHash("sha256");
+  for (const url of shell) {
+    const file = url.split("?")[0];
+    digest.update(file);
+    digest.update(await readFile(join(DIST, file)));
   }
+  const cacheName = `dubnator-${digest.digest("hex").slice(0, 12)}`;
+  const template = await readFile(join(ROOT, "sw.js"), "utf8");
+  const output = template
+    .replace('"__DUBNATOR_CACHE__"', JSON.stringify(cacheName))
+    .replace("/*__DUBNATOR_SHELL__*/ []", JSON.stringify(shell, null, 2));
+  if (output.includes("__DUBNATOR_")) {
+    throw new Error("Service-worker template placeholders were not replaced");
+  }
+  await writeFile(join(DIST, "sw.js"), output);
 }
 
 // Each .jsx is a classic <script> (not a module), but they all declare
@@ -139,7 +182,8 @@ async function main() {
 
   await ctx.rebuild();
   await copyStatic();
-  await rewriteHtml();
+  const shell = await rewriteHtml();
+  if (!SERVE) await writeServiceWorker(shell);
 
   if (SERVE) {
     await ctx.watch();

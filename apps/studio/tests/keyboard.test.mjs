@@ -12,6 +12,7 @@ import { dirname, join } from "node:path";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = readFileSync(join(ROOT, "app.jsx"), "utf8");
+const KEYBOARD_SRC = readFileSync(join(ROOT, "keyboard-map.jsx"), "utf8");
 
 // Slice out the down() keydown handler body (from "const down = (e) =>" up to
 // the "const up = (e) =>" that follows it) so we only match real bindings.
@@ -94,16 +95,16 @@ test("every labeled overlay key has a matching down() handler branch", () => {
 
 test("every canonical overlay key carries the expected top label", () => {
   // Pull the KEY_ROWS literal and check each expected label substring is present.
-  const krStart = SRC.indexOf("const KEY_ROWS = [");
-  const krEnd = SRC.indexOf("const COLOR_LEGEND");
+  const krStart = KEYBOARD_SRC.indexOf("const KEY_ROWS = [");
+  const krEnd = KEYBOARD_SRC.indexOf("const COLOR_LEGEND");
   assert.ok(krStart > 0 && krEnd > krStart, "could not locate KEY_ROWS");
-  const KR = SRC.slice(krStart, krEnd);
+  const KR = KEYBOARD_SRC.slice(krStart, krEnd);
   const missing = CANON.filter(([, , label]) => !KR.includes(`"${label}"`)).map(([d, , l]) => `${d}: "${l}"`);
   assert.deepEqual(missing, [], `overlay labels missing/renamed:\n  ${missing.join("\n  ")}`);
 });
 
 test("the dead botLabel field is gone (it never rendered)", () => {
-  assert.ok(!SRC.includes("botLabel"), "KEY_ROWS still has a botLabel field, which KeyboardMap never renders");
+  assert.ok(!KEYBOARD_SRC.includes("botLabel"), "KEY_ROWS still has a botLabel field, which KeyboardMap never renders");
 });
 
 test("removed mis-bindings are actually gone", () => {

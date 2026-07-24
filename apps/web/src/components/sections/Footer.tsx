@@ -19,8 +19,8 @@ const columns: { heading: string; links: FooterLink[] }[] = [
     heading: "Rack",
     links: [
       { label: "Features", href: "#features" },
-      { label: "Modules", href: "#modules" },
-      { label: "Spec", href: "#spec" },
+      { label: "For the dance", href: "#for-the-dance" },
+      { label: "Live demo", href: "#live-demo" },
     ],
   },
   {
