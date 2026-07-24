@@ -870,6 +870,9 @@
       // siren
       this.siren = new DubSiren(ctx);
       this.siren.output.connect(this.masterSum);
+      this.sirenMeter = ctx.createAnalyser();
+      this.sirenMeter.fftSize = 512;
+      this.sirenMeter.smoothingTimeConstant = 0.3;
       this.sirenReverbSend = ctx.createGain(); this.sirenReverbSend.gain.value = 0;
       this.sirenEchoSend = ctx.createGain(); this.sirenEchoSend.gain.value = 0;
       this.siren.output.connect(this.sirenReverbSend);
@@ -883,6 +886,10 @@
       this.samplesHP.frequency.value = 20;
       this.samples.gain.connect(this.samplesHP);
       this.samplesHP.connect(this.masterSum);
+      this.samplesMeter = ctx.createAnalyser();
+      this.samplesMeter.fftSize = 512;
+      this.samplesMeter.smoothingTimeConstant = 0.3;
+      this.samplesHP.connect(this.samplesMeter);
       this.samplesReverbSend = ctx.createGain(); this.samplesReverbSend.gain.value = 0;
       this.samplesEchoSend = ctx.createGain(); this.samplesEchoSend.gain.value = 0;
       this.samplesHP.connect(this.samplesReverbSend);
@@ -1014,6 +1021,15 @@
       this.echoLimEnabled = true;
       this.reverbReturn.connect(this.reverbLim).connect(this.masterBus);
       this.echoReturn.connect(this.echoLim).connect(this.masterBus);
+
+      this.reverbMeter = ctx.createAnalyser();
+      this.reverbMeter.fftSize = 512;
+      this.reverbMeter.smoothingTimeConstant = 0.3;
+      this.echoMeter = ctx.createAnalyser();
+      this.echoMeter.fftSize = 512;
+      this.echoMeter.smoothingTimeConstant = 0.3;
+      this.reverbLim.connect(this.reverbMeter);
+      this.echoLim.connect(this.echoMeter);
 
       // FX-only analyser: sums the post-limiter reverb + echo returns, so the
       // display can show just the wet FX signal.
@@ -1600,6 +1616,7 @@
         t.connect(this.masterSum);
         t.connect(this.sirenReverbSend);
         t.connect(this.sirenEchoSend);
+        t.connect(this.sirenMeter);
         this._sirenTrim = t;
       }
       this._sirenTrim.gain.value = v;
@@ -1643,6 +1660,29 @@
         return Math.sqrt(s / buf.length);
       };
       return { in1: rms(this.in1Meter), in2: rms(this.in2Meter), aux: rms(this.auxMeter) };
+    }
+
+    // Post-fader/source VU taps used by external control surfaces. The
+    // analysers are sinks and do not alter or duplicate the audible signal.
+    getSourceLevels() {
+      if (!this._sourceLvlBuf) this._sourceLvlBuf = new Uint8Array(512);
+      const buf = this._sourceLvlBuf;
+      const rms = (an) => {
+        if (!an) return 0;
+        an.getByteTimeDomainData(buf);
+        let s = 0;
+        for (let i = 0; i < buf.length; i++) {
+          const v = (buf[i] - 128) / 128;
+          s += v * v;
+        }
+        return Math.sqrt(s / buf.length);
+      };
+      return {
+        samples: rms(this.samplesMeter),
+        siren: rms(this.sirenMeter),
+        reverb: rms(this.reverbMeter),
+        echo: rms(this.echoMeter),
+      };
     }
 
     // Live gain reduction (dB, <= 0) for each limiter — drives the "limiting"

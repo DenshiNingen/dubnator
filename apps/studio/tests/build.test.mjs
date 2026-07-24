@@ -32,8 +32,10 @@ test("compatibility globals load before their consumers", () => {
     "audio-engine.js",
     "midi.js",
     "midi-controls.js",
+    "launchpad.js",
     "floating-window.js",
     "keyboard-map.js",
+    "launchpad-help.js",
     "playlist-modal.js",
     "app.js",
   ];

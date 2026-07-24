@@ -120,5 +120,15 @@ section("channel isolation");
   ok(fired, "correct channel fires");
 }
 
+section("semantic surface dispatch");
+{
+  const m = new MidiMapper();
+  const values = [];
+  m.register("surface.range", (value, event) => values.push({ value, surface: event.surface }), { type: "range" });
+  ok(m.dispatch("surface.range", 0.75, { device: "launchpad-a" }) === true, "registered surface control dispatches");
+  ok(values.length === 1 && values[0].value === 0.75 && values[0].surface === true, "surface event reaches the handler");
+  ok(m.dispatch("missing", 1) === false, "unknown semantic control is ignored safely");
+}
+
 console.log(`\n${fail === 0 ? "✓ PASS" : "✗ FAIL"} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

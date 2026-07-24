@@ -29,6 +29,7 @@ const JSX_ENTRIES = [
   "tweaks-panel.jsx",
   "floating-window.jsx",
   "keyboard-map.jsx",
+  "launchpad-help.jsx",
   "playlist-modal.jsx",
   "app.jsx",
 ];
@@ -36,6 +37,7 @@ const STATIC_FILES = [
   "audio-codecs.js",
   "audio-engine.js",
   "bootstrap.js",
+  "launchpad.js",
   "midi.js",
   "midi-controls.js",
   "register-sw.js",
@@ -49,11 +51,12 @@ const VENDOR_MAP = {
 
 async function rewriteHtml() {
   const src = await readFile(join(ROOT, "Dubnator.html"), "utf8");
-  const [cssV, codecsV, audioV, bootstrapV, midiV, midiControlsV, registerSwV] = await Promise.all([
+  const [cssV, codecsV, audioV, bootstrapV, launchpadV, midiV, midiControlsV, registerSwV] = await Promise.all([
     assetHash("styles.css"),
     assetHash("audio-codecs.js"),
     assetHash("audio-engine.js"),
     assetHash("bootstrap.js"),
+    assetHash("launchpad.js"),
     assetHash("midi.js"),
     assetHash("midi-controls.js"),
     assetHash("register-sw.js"),
@@ -69,6 +72,7 @@ async function rewriteHtml() {
     .replaceAll("audio-codecs.js?v=0", `audio-codecs.js?v=${codecsV}`)
     .replaceAll("audio-engine.js?v=0", `audio-engine.js?v=${audioV}`)
     .replaceAll("bootstrap.js?v=0", `bootstrap.js?v=${bootstrapV}`)
+    .replaceAll("launchpad.js?v=0", `launchpad.js?v=${launchpadV}`)
     .replaceAll("midi.js?v=0", `midi.js?v=${midiV}`)
     .replaceAll("midi-controls.js?v=0", `midi-controls.js?v=${midiControlsV}`);
   for (const entry of JSX_ENTRIES) {
@@ -94,6 +98,7 @@ async function rewriteHtml() {
     `audio-codecs.js?v=${codecsV}`,
     `audio-engine.js?v=${audioV}`,
     `bootstrap.js?v=${bootstrapV}`,
+    `launchpad.js?v=${launchpadV}`,
     `midi.js?v=${midiV}`,
     `midi-controls.js?v=${midiControlsV}`,
     `register-sw.js?v=${registerSwV}`,

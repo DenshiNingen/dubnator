@@ -238,6 +238,16 @@ section("IN1/IN2/aux channel VU meters wired (post-fader taps)");
   ok(il && ["in1", "in2", "aux"].every((k) => typeof il[k] === "number" && il[k] >= 0 && il[k] <= 1), "getInputLevels returns in1/in2/aux in 0..1");
 }
 
+section("samples/siren/reverb/echo source VU meters wired");
+{
+  ok(eng.samplesMeter && eng.sirenMeter && eng.reverbMeter && eng.echoMeter, "four source meter analysers created");
+  ok(eng.samplesHP._conns.includes(eng.samplesMeter), "post-gain samples path feeds its meter");
+  ok(eng._sirenTrim && eng._sirenTrim._conns.includes(eng.sirenMeter), "post-gain siren path feeds its meter");
+  ok(eng.reverbLim._conns.includes(eng.reverbMeter) && eng.echoLim._conns.includes(eng.echoMeter), "post-limiter FX returns feed their meters");
+  const sl = eng.getSourceLevels();
+  ok(sl && ["samples", "siren", "reverb", "echo"].every((k) => typeof sl[k] === "number" && sl[k] >= 0 && sl[k] <= 1), "getSourceLevels returns four levels in 0..1");
+}
+
 section("dub filter routing keeps VU taps + sample FX sends connected (regression)");
 {
   const m0 = eng.musicBus._conns.length;   // 4 band meters + 1 routing node

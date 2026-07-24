@@ -7,7 +7,7 @@
   "scripts": {
     "build": "node build.mjs",
     "dev": "node build.mjs --serve",
-    "test": "node --test tests/build.test.mjs tests/keyboard.test.mjs && node tests/engine.test.mjs && node tests/recorder.test.mjs && node tests/midi.test.mjs",
+    "test": "node --test tests/build.test.mjs tests/keyboard.test.mjs tests/launchpad.test.mjs && node tests/engine.test.mjs && node tests/recorder.test.mjs && node tests/midi.test.mjs",
     "lint": "eslint .",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",

@@ -2,6 +2,7 @@
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
 const FREQS_10 = [32, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+const ECHO_DIVS = ["1/4", "1/4.", "1/4t", "1/8", "1/8.", "1/8t", "1/16", "1/16t"];
 // Quick 10-band graphic-EQ preset shapes (dB per band, all within the ±12 slider
 // range). Applied to Deck A's GEQ; copy to B with the →B button.
 const EQ_SHAPES = {
@@ -16,6 +17,7 @@ const KILL_FREQ_RANGE = { sub: [20, 300], bass: [80, 800], mid: [300, 5000], hig
 const eng = window.DubnatorEngine;
 const { FloatingWindow, useFloatingBox } = window.DubnatorFloating;
 const { KeyboardMap } = window.DubnatorKeyboardMap;
+const { LaunchpadLayoutHelp } = window.DubnatorLaunchpadHelp;
 const PlaylistModal = window.DubnatorPlaylistModal;
 const MIDI_CONTROLS = window.DubnatorMidiControls;
 
@@ -322,6 +324,7 @@ function App() {
   const [advanced, setAdvanced] = useState(false);
   const [sirenSetupOpen, setSirenSetupOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [helpView, setHelpView] = useState("launchpads");
   const [activeDeck, setActiveDeck] = useState("A"); // for shift-modified deck cycling
 
   // === FX limiters ===
@@ -419,13 +422,24 @@ function App() {
   // === MIDI mapping ===
   const mapperRef = useRef(null);
   const midiConnectedRef = useRef(false); // Web MIDI inputs hooked up at least once
+  const midiConnectingRef = useRef(false);
   const [midiOpen, setMidiOpen] = useState(false);
   const [midiInputs, setMidiInputs] = useState([]);
   const [midiLearnId, setMidiLearnId] = useState(null);
   const [midiBindings, setMidiBindings] = useState({});
   const [midiErr, setMidiErr] = useState("");
+  const [midiPermission, setMidiPermission] = useState("unknown");
   const [midiPickup, setMidiPickup] = useState(false);
   const [midiModes, setMidiModes] = useState({}); // controlId -> momentary?
+  const launchpadRef = useRef(null);
+  const launchpadMeterFrameRef = useRef(0);
+  const midiTransportRef = useRef({ send: null });
+  const actionsRef = useRef({});
+  const liveStateRef = useRef({});
+  const [launchpads, setLaunchpads] = useState([]);
+  const launchpadHelpAvailable = launchpads.some((device) => device.connected);
+  const activeHelpView = launchpadHelpAvailable ? helpView : "keyboard";
+  const [launchpadReversed, setLaunchpadReversed] = useState(false);
 
   // === samples ===
   const [flashIdx, setFlashIdx] = useState(-1); // transient: pad lit *right now* by a trigger (auto-clears ~180ms)
@@ -450,10 +464,21 @@ function App() {
   const [masterPeakDb, setMasterPeakDb] = useState(-Infinity);
   const [bandLevels, setBandLevels] = useState({ sub: 0, bass: 0, mid: 0, high: 0, top: 0 });
   const [inLevels, setInLevels] = useState({ in1: 0, in2: 0, aux: 0 }); // IN1/IN2/aux VU levels
+  const [sourceLevels, setSourceLevels] = useState({ samples: 0, siren: 0, reverb: 0, echo: 0 });
   const [gr, setGr] = useState({ master: 0, reverb: 0, echo: 0 });
 
   // EQ select pane
   const [eqSelect, setEqSelect] = useState("ALL EQS");
+
+  // Purpose-built MIDI surfaces use this ref so their handlers never retain a
+  // stale render of toggle/selector state.
+  liveStateRef.current = {
+    deckA, deckB, inputs, crossfade, crossfadeCurve, musicSends, auxSends,
+    auxLevels, geqA, paramA, kills, flatGain, killTrims, killQ, killFreqs,
+    pureSub, reverb, echo, dubFilter, sampleFx, master, revLim, echoLim,
+    siren, sirenHeld, selectedSample, flashIdx, recording, recFormat,
+    advanced, autoAdvance, rewindStop, micOn,
+  };
 
   // === setup deck callbacks ===
   // updates audio engine when state changes
@@ -646,6 +671,15 @@ function App() {
         const il = eng.getInputLevels();
         setInLevels({ in1: Math.min(1, il.in1 * 3), in2: Math.min(1, il.in2 * 3), aux: Math.min(1, il.aux * 3) });
       }
+      if (eng.getSourceLevels) {
+        const sl = eng.getSourceLevels();
+        setSourceLevels({
+          samples: Math.min(1, sl.samples * 3),
+          siren: Math.min(1, sl.siren * 3),
+          reverb: Math.min(1, sl.reverb * 3),
+          echo: Math.min(1, sl.echo * 3),
+        });
+      }
       if (eng.getLimiterReduction) setGr(eng.getLimiterReduction());
       // deck times
       setDeckA((s) => ({ ...s, time: eng.deckA.getCurrentTime(), dur: eng.deckA.getDuration(), name: eng.deckA.name, playing: eng.deckA.playing, cued: eng.deckA.hasCue() }));
@@ -835,14 +869,33 @@ function App() {
     return () => clearInterval(id);
   }, [ready]);
 
-  // === MIDI: register controls against the mapper (once, on ready) ===
+  // === MIDI: register controls against the mapper once on mount ===
   const MIDI_KEY = "dubnator.midi.v1";
   useEffect(() => {
-    if (!ready) return;
     const M = typeof window !== "undefined" && window.DubnatorMidi;
     if (!M) return;
     if (!mapperRef.current) mapperRef.current = new M.MidiMapper();
     const m = mapperRef.current;
+    const LP = typeof window !== "undefined" && window.DubnatorLaunchpad;
+    if (LP && !launchpadRef.current) {
+      launchpadRef.current = new LP.LaunchpadMiniMk3Manager({
+        catalog: MIDI_CONTROLS,
+        onControl: (id, value, event) => {
+          const mapper = mapperRef.current;
+          if (mapper) mapper.dispatch(id, value, event);
+        },
+        send: (outputId, message) => {
+          const send = midiTransportRef.current.send;
+          if (send) send(outputId, message);
+        },
+        onStatus: setLaunchpads,
+      });
+      try {
+        const reversed = localStorage.getItem("dubnator.launchpad.reverse.v1") === "1";
+        launchpadRef.current.setReverse(reversed);
+        setLaunchpadReversed(reversed);
+      } catch (_) {}
+    }
     // All handlers use stable setters + functional updates → closure-safe.
     const H = {
       "master.gain": (v) => setMaster((s) => ({ ...s, gain: +(v * 1.5).toFixed(3) })),
@@ -925,11 +978,109 @@ function App() {
       "samples.hp": (v) => setSampleFx((s) => ({ ...s, hp: Math.round(20 + v * 1980) })),
       "siren.revsend": (v) => setSiren((s) => ({ ...s, reverbSend: v })),
       "siren.echosend": (v) => setSiren((s) => ({ ...s, echoSend: v })),
+      "deckA.mute": (v) => setDeckA((s) => ({ ...s, mute: v > 0.5 })),
+      "deckA.rewindlen": (v) => setDeckA((s) => ({ ...s, rewindLen: +(0.5 + v * 19.5).toFixed(1) })),
+      "deckA.autogain": (v) => setDeckA((s) => ({ ...s, autoGain: v > 0.5 })),
+      "deckA.loop.in": (v) => { if (v > 0.5) actionsRef.current.deckLoop?.("A", "in"); },
+      "deckA.loop.out": (v) => { if (v > 0.5) actionsRef.current.deckLoop?.("A", "out"); },
+      "deckA.loop.clear": (v) => { if (v > 0.5) actionsRef.current.deckLoop?.("A", "clear"); },
+      "deckA.loop.beat1": (v) => { if (v > 0.5) actionsRef.current.deckLoop?.("A", "beat", 1); },
+      "deckA.loop.beat2": (v) => { if (v > 0.5) actionsRef.current.deckLoop?.("A", "beat", 2); },
+      "deckA.loop.beat4": (v) => { if (v > 0.5) actionsRef.current.deckLoop?.("A", "beat", 4); },
+      "deckA.loop.half": (v) => { if (v > 0.5) actionsRef.current.deckLoop?.("A", "half"); },
+      "deckA.loop.double": (v) => { if (v > 0.5) actionsRef.current.deckLoop?.("A", "double"); },
+      "deckB.mute": (v) => setDeckB((s) => ({ ...s, mute: v > 0.5 })),
+      "deckB.rewindlen": (v) => setDeckB((s) => ({ ...s, rewindLen: +(0.5 + v * 19.5).toFixed(1) })),
+      "deckB.autogain": (v) => setDeckB((s) => ({ ...s, autoGain: v > 0.5 })),
+      "deckB.loop.in": (v) => { if (v > 0.5) actionsRef.current.deckLoop?.("B", "in"); },
+      "deckB.loop.out": (v) => { if (v > 0.5) actionsRef.current.deckLoop?.("B", "out"); },
+      "deckB.loop.clear": (v) => { if (v > 0.5) actionsRef.current.deckLoop?.("B", "clear"); },
+      "deckB.loop.beat1": (v) => { if (v > 0.5) actionsRef.current.deckLoop?.("B", "beat", 1); },
+      "deckB.loop.beat2": (v) => { if (v > 0.5) actionsRef.current.deckLoop?.("B", "beat", 2); },
+      "deckB.loop.beat4": (v) => { if (v > 0.5) actionsRef.current.deckLoop?.("B", "beat", 4); },
+      "deckB.loop.half": (v) => { if (v > 0.5) actionsRef.current.deckLoop?.("B", "half"); },
+      "deckB.loop.double": (v) => { if (v > 0.5) actionsRef.current.deckLoop?.("B", "double"); },
+      "in1.mute": (v) => setInputs((s) => ({ ...s, in1: { ...s.in1, mute: v > 0.5 } })),
+      "in1.pan": (v) => setInputs((s) => ({ ...s, in1: { ...s.in1, pan: +((v - 0.5) * 2).toFixed(2) } })),
+      "in2.mute": (v) => setInputs((s) => ({ ...s, in2: { ...s.in2, mute: v > 0.5 } })),
+      "in2.pan": (v) => setInputs((s) => ({ ...s, in2: { ...s.in2, pan: +((v - 0.5) * 2).toFixed(2) } })),
+      "aux.mute": (v) => setInputs((s) => ({ ...s, aux: { ...s.aux, mute: v > 0.5 } })),
+      "aux.rev": (v) => setAuxSends((s) => ({ ...s, rev: v > 0.5 })),
+      "aux.echo": (v) => setAuxSends((s) => ({ ...s, echo: v > 0.5 })),
+      "xfade.a": (v) => { if (v > 0.5) setCrossfade(0); },
+      "xfade.center": (v) => { if (v > 0.5) setCrossfade(0.5); },
+      "xfade.b": (v) => { if (v > 0.5) setCrossfade(1); },
+      "xfade.curve.power": (v) => { if (v > 0.5) setCrossfadeCurve("power"); },
+      "xfade.curve.linear": (v) => { if (v > 0.5) setCrossfadeCurve("linear"); },
+      "xfade.curve.sharp": (v) => { if (v > 0.5) setCrossfadeCurve("sharp"); },
+      "flat.gain": (v) => {
+        const db = +(-24 + v * 36).toFixed(1);
+        setFlatGain(Math.min(liveStateRef.current.advanced ? 12 : 0, db));
+      },
+      "reverb.bp": (v) => setReverb((s) => ({ ...s, bpBypass: !(v > 0.5) })),
+      "echo.type1": (v) => { if (v > 0.5) setEcho((s) => ({ ...s, type: 1 })); },
+      "echo.type2": (v) => { if (v > 0.5) setEcho((s) => ({ ...s, type: 2 })); },
+      "echo.tap": (v) => { if (v > 0.5) actionsRef.current.tapTempo?.(); },
+      "echo.div": (v) => setEcho((s) => ({ ...s, syncDiv: ["1/4", "1/4.", "1/4t", "1/8", "1/8.", "1/8t", "1/16", "1/16t"][Math.min(7, Math.round(v * 7))] })),
+      "echo.hp": (v) => setEcho((s) => ({ ...s, hpOn: v > 0.5 })),
+      "echo.panic": (v) => { if (v > 0.5 && eng.panicFX) eng.panicFX(); },
+      "dubfilter.hp": (v) => { if (v > 0.5) setDubFilter((s) => ({ ...s, on: true, mode: "hp" })); },
+      "dubfilter.lp": (v) => { if (v > 0.5) setDubFilter((s) => ({ ...s, on: true, mode: "lp" })); },
+      "dubfilter.route.music": (v) => { if (v > 0.5) setDubFilter((s) => ({ ...s, route: "music", on: true })); },
+      "dubfilter.route.master": (v) => { if (v > 0.5) setDubFilter((s) => ({ ...s, route: "master", on: true })); },
+      "dubfilter.route.samples": (v) => { if (v > 0.5) setDubFilter((s) => ({ ...s, route: "samples", on: true })); },
+      "dubfilter.route.off": (v) => { if (v > 0.5) setDubFilter((s) => ({ ...s, route: "off", on: false })); },
+      "siren.trigger": (v) => actionsRef.current.sirenTrigger?.(v > 0.5),
+      "siren.preset": (v) => actionsRef.current.sirenPreset?.(Math.round(v * 11)),
+      "siren.prev": (v) => { if (v > 0.5) setSiren((s) => stepSirenPreset(s, -1)); },
+      "siren.next": (v) => { if (v > 0.5) setSiren((s) => stepSirenPreset(s, 1)); },
+      "samples.select": (v) => setSelectedSample(Math.round(v * 11)),
+      "samples.hold": (v) => setSampleFx((s) => ({ ...s, hold: v > 0.5 })),
+      "samples.reverse": (v) => setSampleFx((s) => ({ ...s, reverse: v > 0.5 })),
+      "limiter.master.on": (v) => setMaster((s) => ({ ...s, limOn: v > 0.5 })),
+      "limiter.reverb.thresh": (v) => setRevLim((s) => ({ ...s, thresh: Math.round(-24 + v * 24) })),
+      "limiter.reverb.on": (v) => setRevLim((s) => ({ ...s, on: v > 0.5 })),
+      "limiter.echo.thresh": (v) => setEchoLim((s) => ({ ...s, thresh: Math.round(-24 + v * 24) })),
+      "limiter.echo.on": (v) => setEchoLim((s) => ({ ...s, on: v > 0.5 })),
+      "recorder.toggle": (v) => { if (v > 0.5) actionsRef.current.toggleRecord?.(); },
+      "recorder.format": (v) => { if (v > 0.5) setRecFormat((format) => format === "wav" ? "aiff" : "wav"); },
+      "system.advanced": (v) => setAdvanced(v > 0.5),
+      "system.autoadvance": (v) => setAutoAdvance(v > 0.5),
+      "system.rewindstop": (v) => setRewindStop(v > 0.5),
+      "system.mic": (v) => { if (v > 0.5) actionsRef.current.toggleMic?.(); },
+      "system.line": (v) => { if (v > 0.5) actionsRef.current.toggleLine?.(); },
+      "system.multi": (v) => { if (v > 0.5) actionsRef.current.toggleMulti?.(); },
       ...Object.fromEntries(FREQS_10.map((f, i) => [`geqA.${i}`, (v) => setGeqA((a) => a.map((x, j) => j === i ? +((v - 0.5) * 24).toFixed(1) : x))])),
       ...Object.fromEntries([0, 1, 2, 3].flatMap((i) => [
         [`paramA${i}.freq`, (v) => setParamA((a) => a.map((b, j) => j === i ? { ...b, freq: Math.round(20 * Math.pow(1000, v)) } : b))],
         [`paramA${i}.q`, (v) => setParamA((a) => a.map((b, j) => j === i ? { ...b, q: +(0.1 + v * 9.9).toFixed(2) } : b))],
         [`paramA${i}.gain`, (v) => setParamA((a) => a.map((b, j) => j === i ? { ...b, gain: +((v - 0.5) * 36).toFixed(1) } : b))],
+      ])),
+      ...Object.fromEntries(["sub", "bass", "mid", "high", "top"].flatMap((band) => [
+        [`kill.${band}.solo`, (v) => {
+          if (v <= 0.5) return;
+          setKills((current) => {
+            const bands = ["sub", "bass", "mid", "high", "top"];
+            const soloed = !current[band] && bands.filter((item) => item !== band).every((item) => current[item]);
+            return Object.fromEntries(bands.map((item) => [item, soloed ? false : item !== band]));
+          });
+        }],
+        [`kill.${band}.trim`, (v) => setKillTrims((current) => ({
+          ...current,
+          [band]: Math.min(liveStateRef.current.advanced ? 12 : 0, +(-70 + v * 82).toFixed(1)),
+        }))],
+        [`kill.${band}.freq`, (v) => {
+          const [min, max] = KILL_FREQ_RANGE[band];
+          setKillFreqs((current) => ({ ...current, [band]: Math.round(min + v * (max - min)) }));
+        }],
+      ])),
+      ...Object.fromEntries(["bass", "mid", "high"].map((band) => [
+        `kill.${band}.q`,
+        (v) => setKillQ((current) => ({ ...current, [band]: +(0.3 + v * 9.7).toFixed(2) })),
+      ])),
+      ...Object.fromEntries(Array.from({ length: 12 }, (_, index) => [
+        `samples.trigger.${index}`,
+        (v) => actionsRef.current.sampleTrigger?.(index, v > 0.5),
       ])),
     };
     // skip any control without a handler (defensive — keeps a typo from passing
@@ -946,33 +1097,111 @@ function App() {
     const ser0 = m.serialize();
     setMidiBindings(ser0.bindings);
     setMidiModes(ser0.modes || {});
-  }, [ready]);
+  }, []);
+
+  const refreshMidiPermission = async () => {
+    if (typeof window !== "undefined" && window.__TAURI__) {
+      setMidiPermission("native");
+      return "native";
+    }
+    if (typeof navigator === "undefined" || !navigator.requestMIDIAccess) {
+      setMidiPermission("unsupported");
+      return "unsupported";
+    }
+    if (!navigator.permissions?.query) {
+      setMidiPermission("unknown");
+      return "unknown";
+    }
+    try {
+      const permission = await navigator.permissions.query({ name: "midi", sysex: true });
+      setMidiPermission(permission.state);
+      permission.onchange = () => setMidiPermission(permission.state);
+      return permission.state;
+    } catch (_) {
+      // Older Chromium builds expose Web MIDI but not its Permissions API
+      // descriptor. ENABLE MIDI still performs the authoritative request.
+      setMidiPermission("unknown");
+      return "unknown";
+    }
+  };
+
+  useEffect(() => {
+    if (midiOpen) refreshMidiPermission();
+  }, [midiOpen]);
 
   const connectMidi = async () => {
     const m = mapperRef.current; if (!m) return;
+    if (midiConnectingRef.current) return;
+    midiConnectingRef.current = true;
     setMidiErr("");
+    setMidiPermission(window.__TAURI__ ? "native" : "requesting");
     try {
-      // Desktop (Tauri): WKWebView/WebKitGTK have no Web MIDI, so controllers come
-      // from the native Rust bridge as "midi" events with raw [status,d1,d2] bytes.
+      const routeMessage = (payload) => {
+        const surface = launchpadRef.current;
+        if (surface && surface.handleMidi(payload)) return true;
+        const mapper = mapperRef.current;
+        if (mapper) mapper.handleMessage(payload && payload.data ? payload.data : payload);
+        return false;
+      };
+      const attachPorts = (ports) => {
+        const surface = launchpadRef.current;
+        if (surface) surface.setPorts(ports);
+      };
+
+      // Desktop (Tauri): WKWebView/WebKitGTK have no Web MIDI, so controllers
+      // and LED output use the native Rust bridge.
       const tauri = typeof window !== "undefined" && window.__TAURI__;
       if (tauri) {
         if (!window.__dubMidiBridge) {
-          window.__dubMidiBridge = await tauri.event.listen("midi", (e) => {
-            const mp = mapperRef.current;
-            if (mp) mp.handleMessage(e.payload);
-          });
+          window.__dubMidiBridge = await tauri.event.listen("midi", (e) => routeMessage(e.payload));
         }
-        const names = await tauri.core.invoke("connect_midi");
+        const queues = new Map();
+        midiTransportRef.current.send = (outputId, message) => {
+          const previous = queues.get(outputId) || Promise.resolve();
+          const next = previous
+            .catch(() => {})
+            .then(() => tauri.core.invoke("send_midi", { outputId, message: Array.from(message) }))
+            .catch((error) => console.error("MIDI output failed", error));
+          queues.set(outputId, next);
+        };
+        const ports = await tauri.core.invoke("connect_midi");
+        attachPorts(ports);
+        const names = (ports.inputs || []).map((port) => port.name);
         setMidiInputs(names);
         midiConnectedRef.current = true;
+        setMidiPermission("native");
         if (!names.length) setMidiErr("No MIDI inputs detected. Connect a controller and retry.");
         return;
       }
-      const names = await m.connectWebMidi();
+      midiTransportRef.current.send = (outputId, message) => {
+        try { m.sendWebMidi(outputId, message); }
+        catch (error) { console.error("MIDI output failed", error); }
+      };
+      const names = await m.connectWebMidi(undefined, {
+        sysex: true,
+        onMessage: routeMessage,
+        onPorts: attachPorts,
+      });
       setMidiInputs(names);
       midiConnectedRef.current = true;
+      setMidiPermission("granted");
       if (!names.length) setMidiErr("No MIDI inputs detected. Connect a controller and retry.");
-    } catch (e) { setMidiErr(e && e.message ? e.message : "MIDI unavailable"); }
+    } catch (e) {
+      const denied = e?.name === "NotAllowedError" || e?.name === "SecurityError";
+      const unsupported = e?.name === "NotSupportedError";
+      setMidiPermission(denied ? "denied" : unsupported ? "unsupported" : "unknown");
+      setMidiErr(denied
+        ? "MIDI is blocked for this site. In Arc: Site Controls → Site settings → MIDI devices → Allow, then reload."
+        : (e && e.message ? e.message : "MIDI unavailable"));
+    } finally {
+      midiConnectingRef.current = false;
+    }
+  };
+  const swapLaunchpads = () => {
+    const reversed = !launchpadReversed;
+    setLaunchpadReversed(reversed);
+    if (launchpadRef.current) launchpadRef.current.setReverse(reversed);
+    try { localStorage.setItem("dubnator.launchpad.reverse.v1", reversed ? "1" : "0"); } catch (_) {}
   };
   // Current 0..1 value of each MIDI control (inverse of the H setters), used to
   // seed pickup so a physical knob doesn't jump the software value on first move.
@@ -1001,8 +1230,10 @@ function App() {
       "siren.pitch": clamp(Math.log(siren.pitch / 50) / Math.log(2000 / 50)),
       "siren.pan": clamp(siren.autoPan),
       "samples.rev": clamp(sampleFx.reverbSend), "samples.echo": clamp(sampleFx.echoSend),
-      // transport buttons are momentary triggers — pickup doesn't apply (seed 0)
-      "deckA.play": 0, "deckB.play": 0, "deckA.stop": 0, "deckB.stop": 0,
+      // Transport triggers seed their useful feedback state; one-shot actions
+      // remain zero while Play and Cue mirror the deck.
+      "deckA.play": deckA.playing ? 1 : 0, "deckB.play": deckB.playing ? 1 : 0,
+      "deckA.stop": 0, "deckB.stop": 0,
       "deckA.next": 0, "deckA.prev": 0, "deckB.next": 0, "deckB.prev": 0,
       "deckA.rewind": 0, "deckB.rewind": 0,
       "master.mono": master.mono ? 1 : 0, "master.dim": master.dim ? 1 : 0,
@@ -1012,7 +1243,8 @@ function App() {
       "siren.lfo2rate": clamp(siren.lfo2Rate / 15), "siren.lfo2depth": clamp(siren.lfo2Depth / 400),
       "siren.bits": clamp((siren.bits - 2) / 14), "siren.sr": clamp(siren.sr),
       "aux.revlevel": clamp(auxLevels.rev), "aux.echolevel": clamp(auxLevels.echo),
-      "deckA.cue": 0, "deckA.jumpcue": 0, "deckB.cue": 0, "deckB.jumpcue": 0,
+      "deckA.cue": deckA.cued ? 1 : 0, "deckA.jumpcue": 0,
+      "deckB.cue": deckB.cued ? 1 : 0, "deckB.jumpcue": 0,
       "deckA.gain": clamp(deckA.gain / 1.5), "deckA.pan": clamp(deckA.pan / 2 + 0.5),
       "deckB.gain": clamp(deckB.gain / 1.5), "deckB.pan": clamp(deckB.pan / 2 + 0.5),
       "in1.gain": clamp(inputs.in1.gain / 1.5), "in2.gain": clamp(inputs.in2.gain / 1.5),
@@ -1024,11 +1256,81 @@ function App() {
       "dubfilter.sweeprate": clamp((dubFilter.sweepRate - 0.05) / 7.95),
       "master.hp": clamp((master.hp - 20) / 380), "samples.hp": clamp((sampleFx.hp - 20) / 1980),
       "siren.revsend": clamp(siren.reverbSend), "siren.echosend": clamp(siren.echoSend),
+      "deckA.mute": deckA.mute ? 1 : 0,
+      "deckA.rewindlen": clamp((deckA.rewindLen - 0.5) / 19.5),
+      "deckA.autogain": deckA.autoGain ? 1 : 0,
+      "deckA.loop.in": 0, "deckA.loop.out": 0,
+      "deckA.loop.clear": deckA.loopOn ? 1 : 0,
+      "deckA.loop.beat1": 0, "deckA.loop.beat2": 0, "deckA.loop.beat4": 0,
+      "deckA.loop.half": 0, "deckA.loop.double": 0,
+      "deckB.mute": deckB.mute ? 1 : 0,
+      "deckB.rewindlen": clamp((deckB.rewindLen - 0.5) / 19.5),
+      "deckB.autogain": deckB.autoGain ? 1 : 0,
+      "deckB.loop.in": 0, "deckB.loop.out": 0,
+      "deckB.loop.clear": deckB.loopOn ? 1 : 0,
+      "deckB.loop.beat1": 0, "deckB.loop.beat2": 0, "deckB.loop.beat4": 0,
+      "deckB.loop.half": 0, "deckB.loop.double": 0,
+      "in1.mute": inputs.in1.mute ? 1 : 0, "in1.pan": clamp(inputs.in1.pan / 2 + 0.5),
+      "in2.mute": inputs.in2.mute ? 1 : 0, "in2.pan": clamp(inputs.in2.pan / 2 + 0.5),
+      "aux.mute": inputs.aux.mute ? 1 : 0,
+      "aux.rev": auxSends.rev ? 1 : 0, "aux.echo": auxSends.echo ? 1 : 0,
+      "xfade.a": crossfade <= 0.01 ? 1 : 0,
+      "xfade.center": Math.abs(crossfade - 0.5) <= 0.01 ? 1 : 0,
+      "xfade.b": crossfade >= 0.99 ? 1 : 0,
+      "xfade.curve.power": crossfadeCurve === "power" ? 1 : 0,
+      "xfade.curve.linear": crossfadeCurve === "linear" ? 1 : 0,
+      "xfade.curve.sharp": crossfadeCurve === "sharp" ? 1 : 0,
+      "flat.gain": clamp((flatGain + 24) / 36),
+      "reverb.bp": reverb.bpBypass ? 0 : 1,
+      "echo.type1": echo.type === 1 ? 1 : 0, "echo.type2": echo.type === 2 ? 1 : 0,
+      "echo.tap": 0,
+      "echo.div": clamp((echo.syncDiv === "1/4" ? 0 : echo.syncDiv === "1/4." ? 1 : echo.syncDiv === "1/4t" ? 2 : echo.syncDiv === "1/8" ? 3 : echo.syncDiv === "1/8." ? 4 : echo.syncDiv === "1/8t" ? 5 : echo.syncDiv === "1/16" ? 6 : 7) / 7),
+      "echo.hp": echo.hpOn ? 1 : 0, "echo.panic": 0,
+      "dubfilter.hp": dubFilter.on && dubFilter.mode === "hp" ? 1 : 0,
+      "dubfilter.lp": dubFilter.on && dubFilter.mode === "lp" ? 1 : 0,
+      "dubfilter.route.music": dubFilter.route === "music" ? 1 : 0,
+      "dubfilter.route.master": dubFilter.route === "master" ? 1 : 0,
+      "dubfilter.route.samples": dubFilter.route === "samples" ? 1 : 0,
+      "dubfilter.route.off": !dubFilter.on || dubFilter.route === "off" ? 1 : 0,
+      "siren.trigger": sirenHeld ? 1 : 0,
+      "siren.preset": clamp(siren.preset / 11),
+      "siren.prev": 0, "siren.next": 0,
+      "samples.select": clamp(selectedSample / 11),
+      "samples.hold": sampleFx.hold ? 1 : 0,
+      "samples.reverse": sampleFx.reverse ? 1 : 0,
+      "limiter.master.on": master.limOn ? 1 : 0,
+      "limiter.reverb.thresh": clamp((revLim.thresh + 24) / 24),
+      "limiter.reverb.on": revLim.on ? 1 : 0,
+      "limiter.echo.thresh": clamp((echoLim.thresh + 24) / 24),
+      "limiter.echo.on": echoLim.on ? 1 : 0,
+      "recorder.toggle": recording ? 1 : 0,
+      "recorder.format": recFormat === "aiff" ? 1 : 0,
+      "system.advanced": advanced ? 1 : 0,
+      "system.autoadvance": autoAdvance ? 1 : 0,
+      "system.rewindstop": rewindStop ? 1 : 0,
+      "system.mic": micOn ? 1 : 0,
+      "system.line": lineOn ? 1 : 0,
+      "system.multi": multiOn ? 1 : 0,
       ...Object.fromEntries(FREQS_10.map((f, i) => [`geqA.${i}`, clamp(geqA[i] / 24 + 0.5)])),
       ...Object.fromEntries([0, 1, 2, 3].flatMap((i) => [
         [`paramA${i}.freq`, clamp(Math.log(paramA[i].freq / 20) / Math.log(1000))],
         [`paramA${i}.q`, clamp((paramA[i].q - 0.1) / 9.9)],
         [`paramA${i}.gain`, clamp(paramA[i].gain / 36 + 0.5)],
+      ])),
+      ...Object.fromEntries(["sub", "bass", "mid", "high", "top"].flatMap((band) => [
+        [`kill.${band}.solo`, isSoloed(band) ? 1 : 0],
+        // Preserve the stored trim, but make the hardware fader mirror the
+        // effective cut while KILL is engaged. Releasing KILL restores it.
+        [`kill.${band}.trim`, kills[band] ? 0 : clamp((killTrims[band] + 70) / 82)],
+        [`kill.${band}.freq`, clamp((killFreqs[band] - KILL_FREQ_RANGE[band][0]) / (KILL_FREQ_RANGE[band][1] - KILL_FREQ_RANGE[band][0]))],
+      ])),
+      ...Object.fromEntries(["bass", "mid", "high"].map((band) => [
+        `kill.${band}.q`,
+        clamp((killQ[band] - 0.3) / 9.7),
+      ])),
+      ...Object.fromEntries(Array.from({ length: 12 }, (_, index) => [
+        `samples.trigger.${index}`,
+        flashIdx === index ? 1 : 0,
       ])),
     };
   };
@@ -1049,7 +1351,13 @@ function App() {
     if (!m || !midiPickup) return;
     const vals = midiValues01();
     for (const id in vals) m.notifyExternal(id, vals[id]);
-  }, [midiPickup, ready, master, echo, reverb, dubFilter, siren, sampleFx, crossfade, kills, musicSends, auxLevels, pureSub]);
+  }, [
+    midiPickup, ready, master, echo, reverb, dubFilter, siren, sampleFx,
+    crossfade, crossfadeCurve, kills, killTrims, killFreqs, killQ, flatGain,
+    musicSends, auxSends, auxLevels, pureSub, deckA, deckB, inputs, geqA,
+    paramA, revLim, echoLim, selectedSample, flashIdx, recording, recFormat,
+    advanced, autoAdvance, rewindStop, micOn,
+  ]);
   const midiToggleMomentary = (id) => {
     const m = mapperRef.current; if (!m) return;
     m.setMomentary(id, !m.isMomentary(id));
@@ -1527,6 +1835,125 @@ function App() {
   const soloKill = (key) => setKills(() => isSoloed(key)
     ? Object.fromEntries(KILL_BANDS.map((b) => [b, false]))
     : Object.fromEntries(KILL_BANDS.map((b) => [b, b !== key])));
+
+  const deckLoopFromSurface = (label, operation, beats = 0) => {
+    const deck = label === "A" ? eng.deckA : eng.deckB;
+    const setDeck = label === "A" ? setDeckA : setDeckB;
+    const state = label === "A" ? liveStateRef.current.deckA : liveStateRef.current.deckB;
+    if (!deck || !state) return;
+    if (operation === "in") {
+      const loopIn = deck.getCurrentTime();
+      setDeck((current) => ({ ...current, loopIn }));
+    } else if (operation === "out") {
+      const start = state.loopIn || 0;
+      const end = deck.getCurrentTime();
+      if (end > start + 0.05) {
+        deck.setLoopRegion(start, end);
+        setDeck((current) => ({ ...current, loopOn: true }));
+      }
+    } else if (operation === "clear") {
+      deck.clearLoopRegion();
+      setDeck((current) => ({ ...current, loopOn: false }));
+    } else if (operation === "beat") {
+      deck.setBeatLoop(liveStateRef.current.echo.bpm, beats);
+      setDeck((current) => ({ ...current, loopOn: true }));
+    } else if (operation === "half") {
+      deck.halveLoop();
+    } else if (operation === "double") {
+      deck.doubleLoop();
+    }
+  };
+
+  const selectSirenPreset = (index) => {
+    setSiren((current) => {
+      const presets = eng.siren ? eng.siren.presets() : [];
+      const selected = Math.max(0, Math.min(11, index));
+      const preset = presets[selected];
+      return preset ? {
+        ...current,
+        preset: selected,
+        pitch: preset.pitch,
+        lfo1Rate: preset.lfo1Rate,
+        lfo1Depth: preset.lfo1Depth,
+        lfo2Rate: preset.lfo2Rate,
+        lfo2Depth: preset.lfo2Depth,
+      } : { ...current, preset: selected };
+    });
+  };
+
+  liveStateRef.current.lineOn = lineOn;
+  liveStateRef.current.multiOn = multiOn;
+  actionsRef.current = {
+    deckLoop: deckLoopFromSurface,
+    tapTempo,
+    toggleRecord,
+    toggleMic,
+    toggleLine,
+    toggleMulti,
+    sirenPreset: selectSirenPreset,
+    sirenTrigger: (pressed) => pressed ? triggerSirenDown() : triggerSirenUp(),
+    sampleTrigger: (index, pressed) => pressed ? triggerSample(index) : releaseSample(index),
+  };
+
+  // Bidirectional Launchpad feedback follows every performance state change.
+  // The manager de-duplicates identical LED frames, so this remains cheap even
+  // while deck time/meters are updating elsewhere.
+  useEffect(() => {
+    if (!launchpadRef.current) return;
+    launchpadRef.current.sync(midiValues01());
+  }, [
+    ready, master, echo, reverb, dubFilter, siren, sampleFx, crossfade,
+    crossfadeCurve, kills, killTrims, killFreqs, killQ, flatGain, musicSends,
+    auxSends, auxLevels, pureSub, deckA, deckB, inputs, geqA, paramA, revLim,
+    echoLim, selectedSample, flashIdx, recording, recFormat, advanced,
+    autoAdvance, rewindStop, micOn, lineOn, multiOn,
+  ]);
+
+  // Hardware VU feedback is quantized to the Launchpad's eight rows and capped
+  // at 25 fps. These are real analyser values: post-fader decks/inputs, master,
+  // and the five post-kill isolator bands.
+  useEffect(() => {
+    if (!launchpadRef.current) return;
+    const now = Date.now();
+    if (now - launchpadMeterFrameRef.current < 40) return;
+    launchpadMeterFrameRef.current = now;
+    const musicLevel = Math.max(
+      bandLevels.sub,
+      bandLevels.bass,
+      bandLevels.mid,
+      bandLevels.high,
+      bandLevels.top,
+    );
+    launchpadRef.current.syncMeters({
+      "deckA.gain": meterA,
+      "deckB.gain": meterB,
+      "in1.gain": inLevels.in1,
+      "in2.gain": inLevels.in2,
+      "aux.gain": inLevels.aux,
+      "samples.gain": sourceLevels.samples,
+      "siren.gain": sourceLevels.siren,
+      "reverb.ret": sourceLevels.reverb,
+      "echo.send": sourceLevels.echo,
+      "master.gain": meterMaster,
+      "flat.gain": musicLevel,
+      "kill.sub.trim": bandLevels.sub,
+      "kill.bass.trim": bandLevels.bass,
+      "kill.mid.trim": bandLevels.mid,
+      "kill.high.trim": bandLevels.high,
+      "kill.top.trim": bandLevels.top,
+    });
+  }, [meterA, meterB, meterMaster, inLevels, sourceLevels, bandLevels]);
+
+  // Native desktop has no permission prompt, so plugging the controllers in and
+  // opening Dubnator is enough. Browser/PWA builds still use ENABLE MIDI because
+  // Web MIDI + SysEx permission requires a user gesture.
+  useEffect(() => {
+    if (window.__TAURI__ && !midiConnectedRef.current) connectMidi();
+  }, [ready]);
+  useEffect(() => () => {
+    if (launchpadRef.current) launchpadRef.current.restoreLiveMode();
+  }, []);
+
   const killBands = (key) => {
     const f = advanced ? killFreqs : { sub: 80, bass: 300, mid: 1000, high: 3000, top: 8000 };
     const cfg = {
@@ -2161,11 +2588,25 @@ function App() {
                   <span className="dot yellow"></span>
                   <span className="dot green"></span>
                 </span>
-                <span className="panel-title" style={{ flex: 1, textAlign: "center" }}>Keyboard Shortcuts</span>
+                <span className="panel-title" style={{ flex: 1, textAlign: "center" }}>Help · Keyboard & Launchpads</span>
                 <button className="btn-xs btn" onClick={() => setHelpOpen(false)}>ESC</button>
               </div>
               <div className="panel-body help-body">
-                <KeyboardMap />
+                <div className="help-view-tabs">
+                  {launchpadHelpAvailable && (
+                    <button className={activeHelpView === "launchpads" ? "active" : ""} onClick={() => setHelpView("launchpads")}>
+                      LAUNCHPADS
+                    </button>
+                  )}
+                  <button className={activeHelpView === "keyboard" ? "active" : ""} onClick={() => setHelpView("keyboard")}>
+                    KEYBOARD
+                  </button>
+                </div>
+                <div className={`help-view help-view-${activeHelpView}`}>
+                  {activeHelpView === "launchpads"
+                    ? <LaunchpadLayoutHelp catalog={MIDI_CONTROLS} devices={launchpads} />
+                    : <KeyboardMap />}
+                </div>
               </div>
             </div>
           </div>,
@@ -2187,7 +2628,9 @@ function App() {
               </div>
               <div className="panel-body" style={{ maxHeight: "70vh", overflowY: "auto", padding: 12 }}>
                 <div className="row gap-2" style={{ marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  <button className="btn-xs btn" onClick={connectMidi}>ENABLE MIDI</button>
+                  <button className="btn-xs btn" onClick={connectMidi} disabled={midiPermission === "requesting"}>
+                    {midiPermission === "requesting" ? "REQUESTING…" : midiPermission === "granted" || midiPermission === "native" ? "REFRESH MIDI" : "ENABLE MIDI"}
+                  </button>
                   <button className={`btn-xs btn ${midiPickup ? "active" : ""}`} onClick={toggleMidiPickup}
                     title="Pickup mode: knobs/faders don't jump — they take over only after the physical position crosses the current value">PICKUP</button>
                   <button className="btn-xs btn" onClick={midiSaveMapping}>SAVE MAP</button>
@@ -2198,8 +2641,48 @@ function App() {
                   <span className="mono" style={{ fontSize: 9, color: "var(--text-dim)" }}>
                     {midiInputs.length ? `IN: ${midiInputs.join(", ")}` : "no device"}
                   </span>
+                  <span className="mono" style={{
+                    fontSize: 9,
+                    color: midiPermission === "granted" || midiPermission === "native"
+                      ? "var(--green)"
+                      : midiPermission === "denied" || midiPermission === "unsupported"
+                        ? "var(--accent)"
+                        : "var(--text-dim)",
+                  }}>
+                    PERMISSION: {midiPermission.toUpperCase()}
+                  </span>
                 </div>
                 {midiErr && <div className="warning-strip" style={{ marginBottom: 8 }}>{midiErr}</div>}
+                <div style={{ border: "1px solid rgba(255,59,0,0.35)", borderRadius: 4, padding: 8, marginBottom: 10, background: "rgba(255,59,0,0.04)" }}>
+                  <div className="row between" style={{ marginBottom: 5 }}>
+                    <span className="mono" style={{ fontSize: 10, color: "var(--accent)" }}>DUAL LAUNCHPAD MINI MK3</span>
+                    <button className="btn-xs btn" onClick={swapLaunchpads} disabled={!launchpads.length}
+                      title="Exchange the MIX/DECKS and FX/EQ roles between the two physical units">
+                      SWAP L/R{launchpadReversed ? " ●" : ""}
+                    </button>
+                  </div>
+                  {launchpads.length ? launchpads.map((device) => (
+                    <div key={device.inputId} style={{ marginTop: 5, paddingTop: 5, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+                      <div className="row between">
+                        <span className="mono" style={{ fontSize: 9 }}>{device.name}</span>
+                        <span className="mono" style={{ fontSize: 9, color: device.connected ? "var(--green)" : "var(--accent)" }}>
+                          {device.connected ? "● " : "○ "}{device.role} · {device.pageName}
+                        </span>
+                      </div>
+                      <div className="mono" style={{ marginTop: 3, fontSize: 8, color: "var(--text-dim)", lineHeight: 1.4 }}>
+                        FADERS: {device.ranges.map((id) => MIDI_CONTROLS.find((control) => control.id === id)?.label || id).join(" · ") || "—"}
+                      </div>
+                      <div className="mono" style={{ marginTop: 2, fontSize: 8, color: "var(--text-faint)", lineHeight: 1.4 }}>
+                        PADS: {device.buttons.map((id) => MIDI_CONTROLS.find((control) => control.id === id)?.label || id).join(" · ") || "—"}
+                      </div>
+                    </div>
+                  )) : (
+                    <div className="mono" style={{ fontSize: 9, color: "var(--text-dim)", lineHeight: 1.45 }}>
+                      Connect both units through their LPMiniMK3 MIDI ports, then press ENABLE MIDI.
+                      The top row selects eight pages; LEDs follow every fader, toggle and selector.
+                    </div>
+                  )}
+                </div>
                 <div className="mono" style={{ fontSize: 9, color: "var(--text-faint)", marginBottom: 6 }}>
                   Click LEARN, then move a knob/press a button on your controller to bind it.
                 </div>
@@ -2310,7 +2793,7 @@ function App() {
                 <select className="mono" style={{ fontSize: 9, background: "#111", color: "var(--accent)", border: "1px solid #333", borderRadius: 3 }}
                   value={echo.syncDiv} onChange={(e) => setEcho(s => ({ ...s, syncDiv: e.target.value }))}
                   title="Echo time as a fraction of the beat">
-                  {["1/4", "1/4.", "1/4t", "1/8", "1/8.", "1/8t", "1/16", "1/16t"].map(d => (
+                  {ECHO_DIVS.map(d => (
                     <option key={d} value={d}>{d}</option>
                   ))}
                 </select>
@@ -2529,7 +3012,7 @@ function App() {
               <div className="kill-trim-row">
                 <span className="mono kill-trim-lbl">GAIN</span>
                 <input type="range" min={-70} max={advanced ? 12 : 0} step={0.5}
-                  value={killTrims[k.key]} disabled={kills[k.key]}
+                  value={kills[k.key] ? -70 : killTrims[k.key]} disabled={kills[k.key]}
                   onChange={(e) => setKillTrims((s) => ({ ...s, [k.key]: +e.target.value }))} />
               </div>
               {advanced && (

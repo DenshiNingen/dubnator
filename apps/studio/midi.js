@@ -40,6 +40,21 @@
     unregister(id) { this.controls.delete(id); }
     registeredIds() { return [...this.controls.keys()]; }
 
+    // Drive a registered control directly from a purpose-built surface. Unlike
+    // handleMessage(), this bypasses learn/binding lookup because the surface
+    // already resolved the physical pad to a semantic control id.
+    dispatch(controlId, value01, event = {}) {
+      const control = this.controls.get(controlId);
+      if (!control) return false;
+      const value = Math.max(0, Math.min(1, Number(value01) || 0));
+      if (control.type === "range") {
+        this._soft.set(controlId, value);
+        if (this.pickupMode) this._pendingEcho.add(controlId);
+      }
+      control.handler(value, { ...event, surface: true });
+      return true;
+    }
+
     // --- Pickup mode ---
     setPickup(on) { this.pickupMode = !!on; this._pendingEcho.clear(); if (!on) this._caught.clear(); }
     isPickup() { return this.pickupMode; }
@@ -187,18 +202,54 @@
       this._changed();
     }
 
-    // Browser-only: hook Web MIDI inputs into handleMessage. Returns a promise
-    // resolving to the list of input names, or rejecting if unsupported/denied.
-    async connectWebMidi(nav) {
+    // Browser-only: hook Web MIDI inputs into handleMessage. Purpose-built
+    // surfaces can inspect/consume source-aware events through options.onMessage
+    // and receive input/output snapshots through options.onPorts.
+    async connectWebMidi(nav, options = {}) {
       const n = nav || (typeof navigator !== "undefined" ? navigator : null);
       if (!n || !n.requestMIDIAccess) throw new Error("Web MIDI not supported in this environment");
-      const access = await n.requestMIDIAccess({ sysex: false });
+      const access = await n.requestMIDIAccess({ sysex: options.sysex === true });
       this._access = access;
-      const attach = (input) => { input.onmidimessage = (e) => this.handleMessage(e.data); };
-      const names = [];
-      access.inputs.forEach((input) => { attach(input); names.push(input.name); });
-      access.onstatechange = (e) => { if (e.port && e.port.type === "input" && e.port.state === "connected") attach(e.port); };
-      return names;
+      const describe = (port) => ({
+        id: port.id,
+        name: port.name || "MIDI",
+        manufacturer: port.manufacturer || "",
+        state: port.state || "connected",
+      });
+      const snapshot = () => {
+        const inputs = [];
+        const outputs = [];
+        access.inputs.forEach((port) => { if (port.state !== "disconnected") inputs.push(describe(port)); });
+        if (access.outputs) access.outputs.forEach((port) => { if (port.state !== "disconnected") outputs.push(describe(port)); });
+        const ports = { inputs, outputs };
+        if (options.onPorts) options.onPorts(ports);
+        return ports;
+      };
+      const attach = (input) => {
+        input.onmidimessage = (e) => {
+          const payload = {
+            deviceId: input.id,
+            name: input.name || "MIDI",
+            manufacturer: input.manufacturer || "",
+            data: Array.from(e.data),
+          };
+          const consumed = options.onMessage ? options.onMessage(payload) === true : false;
+          if (!consumed) this.handleMessage(e.data);
+        };
+      };
+      access.inputs.forEach(attach);
+      const ports = snapshot();
+      access.onstatechange = (e) => {
+        if (e.port && e.port.type === "input" && e.port.state === "connected") attach(e.port);
+        snapshot();
+      };
+      return ports.inputs.map((input) => input.name);
+    }
+
+    sendWebMidi(outputId, data) {
+      const output = this._access && this._access.outputs && this._access.outputs.get(outputId);
+      if (!output) throw new Error(`MIDI output unavailable: ${outputId}`);
+      output.send(data);
     }
   }
 

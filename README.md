@@ -72,6 +72,28 @@ own limiter) · a dub filter with a hands-free auto-sweep · a dub siren · a 12
 sampler with a built-in sound-system kit · a WAV/AIFF recorder · and **total MIDI
 control** — Cmd+Shift+click any knob or fader to MIDI-learn it.
 
+## Two Launchpad Mini MK3s
+
+Dubnator has a built-in, bidirectional surface for two Novation Launchpad Mini
+MK3s. It uses each device's **MIDI** port (not its DAW port), enters Programmer
+Mode automatically, and restores Live Mode when the app closes.
+
+- Give the two units different Device IDs: hold **User** while plugging each one
+  in, then select a different pad in the top two rows.
+- In the native app, the controllers are detected automatically. In the browser,
+  open **MIDI → Enable MIDI** once to grant Web MIDI + SysEx access.
+- The first unit is **MIX / DECKS / INPUTS / ISOLATOR / SIREN / MASTER**; the
+  second is **ECHO / REVERB / FILTER / SAMPLES / ADVANCED ISOLATOR / EQ**.
+- The eight top buttons select pages. Grid columns are LED faders; the remaining
+  grid and side pads are stateful actions. Use **MIDI → Swap L/R** if the physical
+  order is reversed.
+- Open **Help → Launchpad Mini MK3 layouts** for the interactive 8×8 maps and
+  full labels for every page.
+
+The surface covers all 200 catalogued performance controls and keeps faders,
+toggles, selectors, transport, sample/siren pads and active pages synchronized
+with the UI.
+
 ## Deployment
 
 **Web (Vercel).** Two projects from this one repo:
