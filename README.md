@@ -105,10 +105,10 @@ with the UI.
 
 Vercel detects the pnpm workspace and installs from the root; each project builds its
 own subdirectory. The studio build (`node build.mjs`) emits static files to `dist/`.
-The repository root contains a compatibility build entry point for an existing
-Studio project configured at the repository root, but no shared root `vercel.json`:
-project-specific Vercel configuration must not override the other app. Setting the
-two Root Directories to `apps/web` and `apps/studio` remains recommended.
+For existing projects configured at the repository root, `vercel-build.mjs` uses
+Vercel's project-specific production URL to select Web or Studio and mirrors that
+app's static output to the root `dist/`. Setting the two Root Directories to
+`apps/web` and `apps/studio` remains recommended.
 
 **Desktop (GitHub Releases).** Push a tag `vX.Y.Z` → the `release-desktop` workflow
 builds the Tauri app on Windows, macOS and Linux and attaches the installers to a

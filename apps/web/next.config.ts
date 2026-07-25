@@ -1,7 +1,11 @@
 import type { NextConfig } from "next";
 
-const nextConfig: NextConfig = {
-  /* config options here */
-};
+const staticExport = process.env.DUBNATOR_STATIC_EXPORT === "1";
+const nextConfig: NextConfig = staticExport
+  ? {
+      output: "export",
+      images: { unoptimized: true },
+    }
+  : {};
 
 export default nextConfig;
