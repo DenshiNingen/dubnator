@@ -90,6 +90,10 @@ Programmer Mode automatically, and restores Live Mode when the app closes.
 - The eight top buttons select pages. Grid columns are LED faders; the remaining
   grid and side pads are stateful actions. Use **MIDI → Swap L/R** if the physical
   order is reversed.
+- Each detected unit has a persistent **0° Straight / ↺ 90° CCW** orientation.
+  Rotating the left unit counter-clockwise places both controllers' action
+  buttons on their outer edges; input coordinates and all LED feedback rotate
+  with the hardware.
 - Open **Help → Launchpad Mini MK3 layouts** for the interactive 8×8 maps and
   full labels for every page.
 

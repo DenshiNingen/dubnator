@@ -875,8 +875,14 @@ function App() {
     const m = mapperRef.current;
     const LP = typeof window !== "undefined" && window.DubnatorLaunchpad;
     if (LP && !launchpadRef.current) {
+      let launchpadOrientations = {};
+      try {
+        const stored = JSON.parse(localStorage.getItem("dubnator.launchpad.orientations.v1") || "{}");
+        if (stored && typeof stored === "object" && !Array.isArray(stored)) launchpadOrientations = stored;
+      } catch (_) {}
       launchpadRef.current = new LP.LaunchpadMiniMk3Manager({
         catalog: MIDI_CONTROLS,
+        orientations: launchpadOrientations,
         onControl: (id, value, event) => {
           const mapper = mapperRef.current;
           if (mapper) mapper.dispatch(id, value, event);
@@ -889,6 +895,9 @@ function App() {
         onRoleChange: ({ reversed }) => {
           setLaunchpadReversed(reversed);
           try { localStorage.setItem("dubnator.launchpad.reverse.v1", reversed ? "1" : "0"); } catch (_) {}
+        },
+        onOrientationChange: ({ orientations }) => {
+          try { localStorage.setItem("dubnator.launchpad.orientations.v1", JSON.stringify(orientations)); } catch (_) {}
         },
       });
       try {
@@ -1209,6 +1218,12 @@ function App() {
   };
   const selectLaunchpadHelpRole = (role) => {
     if (launchpadRef.current) launchpadRef.current.setSingleRole(role, "help");
+  };
+  const toggleLaunchpadOrientation = (inputId) => {
+    const manager = launchpadRef.current;
+    const device = manager?.getStatus().find((candidate) => candidate.inputId === inputId);
+    if (!device) return;
+    manager.setOrientation(inputId, device.rotated ? "straight" : "ccw", "ui");
   };
   // Current 0..1 value of each MIDI control (inverse of the H setters), used to
   // seed pickup so a physical knob doesn't jump the software value on first move.
@@ -2617,6 +2632,7 @@ function App() {
                         devices={launchpads}
                         onSelectPage={selectLaunchpadHelpPage}
                         onSelectRole={selectLaunchpadHelpRole}
+                        onToggleOrientation={toggleLaunchpadOrientation}
                       />
                     )
                     : <KeyboardMap />}
@@ -2683,16 +2699,27 @@ function App() {
                   </div>
                   {singleLaunchpad && (
                     <div className="mono" style={{ marginBottom: 5, fontSize: 8, color: "var(--yellow)", lineHeight: 1.4 }}>
-                      ONE-CONTROLLER MODE · HOLD TOP ← FOR MIX · HOLD TOP → FOR FX · SHORT PRESS SELECTS THE PAGE
+                      {launchpads[0]?.rotated
+                        ? "ONE-CONTROLLER MODE · HOLD TOP BUTTON 3 FOR MIX · HOLD TOP BUTTON 4 FOR FX · SHORT PRESS SELECTS THE PAGE"
+                        : "ONE-CONTROLLER MODE · HOLD TOP ← FOR MIX · HOLD TOP → FOR FX · SHORT PRESS SELECTS THE PAGE"}
                     </div>
                   )}
                   {launchpads.length ? launchpads.map((device) => (
                     <div key={device.inputId} style={{ marginTop: 5, paddingTop: 5, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
                       <div className="row between">
                         <span className="mono" style={{ fontSize: 9 }}>{device.name}</span>
-                        <span className="mono" style={{ fontSize: 9, color: device.connected ? "var(--green)" : "var(--accent)" }}>
-                          {device.connected ? "● " : "○ "}{device.role} · {device.pageName}
-                        </span>
+                        <div className="row gap-2 aic">
+                          <button
+                            className={`btn-xs btn ${device.rotated ? "active" : ""}`}
+                            onClick={() => toggleLaunchpadOrientation(device.inputId)}
+                            title="Match this physical Launchpad: straight or rotated 90° counter-clockwise"
+                          >
+                            {device.rotated ? "↺ 90° CCW" : "0° STRAIGHT"}
+                          </button>
+                          <span className="mono" style={{ fontSize: 9, color: device.connected ? "var(--green)" : "var(--accent)" }}>
+                            {device.connected ? "● " : "○ "}{device.role} · {device.pageName}
+                          </span>
+                        </div>
                       </div>
                       <div className="mono" style={{ marginTop: 3, fontSize: 8, color: "var(--text-dim)", lineHeight: 1.4 }}>
                         FADERS: {device.ranges.map((id) => MIDI_CONTROLS.find((control) => control.id === id)?.label || id).join(" · ") || "—"}

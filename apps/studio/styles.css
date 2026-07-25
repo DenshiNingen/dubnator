@@ -2505,6 +2505,26 @@ input[type="range"]:disabled { opacity: 0.35; }
   font-size: 11px;
   letter-spacing: 0.04em;
 }
+.lp-help-board-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.lp-help-orientation {
+  padding: 2px 5px;
+  border: 1px solid #3a3d43;
+  border-radius: 3px;
+  background: #18191c;
+  color: #9298a3;
+  font: 700 6px var(--mono);
+  cursor: pointer;
+}
+.lp-help-orientation:hover,
+.lp-help-orientation.active {
+  border-color: var(--lp-colour);
+  background: var(--lp-dim);
+  color: var(--lp-colour);
+}
 .lp-help-connection {
   color: #747b86;
   font: 700 6px var(--mono);
@@ -2618,6 +2638,10 @@ input[type="range"]:disabled { opacity: 0.35; }
 .lp-help-board .lp-help-column-labels {
   gap: 3px;
   margin-bottom: 3px;
+}
+.lp-help-board.is-ccw .lp-help-column-labels,
+.lp-help-board.is-ccw .lp-help-grid {
+  grid-template-columns: 0.72fr repeat(8, minmax(0, 1fr));
 }
 .lp-help-board .lp-help-column-labels div {
   height: 19px;

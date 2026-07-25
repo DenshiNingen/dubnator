@@ -327,6 +327,58 @@
     return null;
   }
 
+  function normalizeOrientation(orientation) {
+    return orientation === "ccw" ? "ccw" : "straight";
+  }
+
+  // Normalize events from a unit that is physically rotated 90° counter-
+  // clockwise into the same logical surface used by a straight Launchpad.
+  // The original right column becomes the top page row, the original top row
+  // becomes the outer-left action column, and the 8×8 grid rotates with them.
+  function orientControl(control, orientation) {
+    if (!control || normalizeOrientation(orientation) !== "ccw") return control;
+    if (control.area === "grid") {
+      return {
+        ...control,
+        row: 7 - control.column,
+        column: control.row,
+      };
+    }
+    if (control.area === "side") {
+      return {
+        area: "top",
+        index: control.row,
+        pressed: control.pressed,
+      };
+    }
+    if (control.area === "top") {
+      return {
+        area: "side",
+        row: 7 - control.index,
+        pressed: control.pressed,
+      };
+    }
+    return control;
+  }
+
+  function orientedGridNote(orientation, row, column) {
+    return normalizeOrientation(orientation) === "ccw"
+      ? gridNote(column, 7 - row)
+      : gridNote(row, column);
+  }
+
+  function orientedTopNote(orientation, index) {
+    return normalizeOrientation(orientation) === "ccw"
+      ? sideNote(index)
+      : 91 + index;
+  }
+
+  function orientedSideNote(orientation, row) {
+    return normalizeOrientation(orientation) === "ccw"
+      ? 91 + (7 - row)
+      : sideNote(row);
+  }
+
   function controlSet(pages) {
     const ids = new Set();
     for (const p of pages) {
@@ -373,6 +425,7 @@
       this.send = options.send || (() => {});
       this.onStatus = options.onStatus || (() => {});
       this.onRoleChange = options.onRoleChange || (() => {});
+      this.onOrientationChange = options.onOrientationChange || (() => {});
       this.now = options.now || (() => Date.now());
       this.schedule = options.schedule || ((callback, delay) => globalThis.setTimeout(callback, delay));
       this.cancelSchedule = options.cancelSchedule || ((timer) => globalThis.clearTimeout(timer));
@@ -382,6 +435,10 @@
       this.meterPeaks = new Map();
       this.devices = [];
       this.reverse = false;
+      this.orientations = {};
+      for (const [inputId, orientation] of Object.entries(options.orientations || {})) {
+        this.orientations[inputId] = normalizeOrientation(orientation);
+      }
       this.pages = completePages(clonePages(LEFT_PAGES), clonePages(RIGHT_PAGES), this.catalog);
     }
 
@@ -412,6 +469,7 @@
         roleHold: null,
         roleHoldTimer: null,
         activeMomentaries: new Map(),
+        orientation: normalizeOrientation(this.orientations[input.id]),
         lastFrame: "",
       }));
       for (const device of this.devices) this._configure(device);
@@ -450,6 +508,8 @@
           role: device.role === 0 ? "LEFT / MIX" : "RIGHT / FX",
           roleIndex: device.role,
           single: this.devices.length === 1,
+          orientation: device.orientation,
+          rotated: device.orientation === "ccw",
           page: device.page,
           pageName: p.name,
           ranges: [...p.ranges],
@@ -548,6 +608,30 @@
       return true;
     }
 
+    setOrientation(inputId, orientation, source = "ui") {
+      const device = this.devices.find((candidate) => candidate.inputId === inputId);
+      if (!device) return false;
+      const nextOrientation = normalizeOrientation(orientation);
+      const changed = device.orientation !== nextOrientation;
+      if (!changed) return true;
+      this._cancelRoleHold(device);
+      this._releaseMomentaries(device, "orientation-change");
+      device.orientation = nextOrientation;
+      this.orientations[inputId] = nextOrientation;
+      device.lastFrame = "";
+      this.render(device, true);
+      this._status();
+      this.onOrientationChange({
+        inputId,
+        name: device.name,
+        orientation: nextOrientation,
+        rotated: nextOrientation === "ccw",
+        orientations: { ...this.orientations },
+        source,
+      });
+      return true;
+    }
+
     setSingleRole(role, source = "ui") {
       if (this.devices.length !== 1) return false;
       const device = this.devices[0];
@@ -604,7 +688,7 @@
       const deviceId = payload && (payload.deviceId || payload.device_id);
       const device = this.devices.find((candidate) => candidate.inputId === deviceId);
       if (!device) return false;
-      const control = decodeControl(data);
+      const control = orientControl(decodeControl(data), device.orientation);
       if (!control) return true;
       if (control.area === "top") {
         this._handleTop(device, control);
@@ -826,27 +910,29 @@
       for (let i = 0; i < 8; i++) {
         const tone = this.pages[device.role][i].tone;
         const colours = PALETTES[tone] || PALETTES.neutral;
-        leds.set(91 + i, i === device.page ? colours.bright : colours.dim);
+        leds.set(orientedTopNote(device.orientation, i), i === device.page ? colours.bright : colours.dim);
       }
       if (this.devices.length === 1 && device.roleHold) {
-        leds.set(91 + device.roleHold.index, PALETTES.neutral.bright);
+        leds.set(orientedTopNote(device.orientation, device.roleHold.index), PALETTES.neutral.bright);
       }
       leds.set(99, device.role === 0 ? PALETTES.green.bright : PALETTES.blue.bright);
 
       for (let column = 0; column < layout.ranges.length; column++) {
         const colours = paletteForControl(layout.ranges[column], layout.page.colour);
         const values = this._rangeColours(layout.ranges[column], colours);
-        for (let row = 0; row < 8; row++) leds.set(gridNote(row, column), values[row]);
+        for (let row = 0; row < 8; row++) {
+          leds.set(orientedGridNote(device.orientation, row, column), values[row]);
+        }
       }
       for (const [position, id] of layout.gridButtons) {
         const [row, column] = position.split(":").map(Number);
         const colours = paletteForControl(id, layout.page.colour);
-        leds.set(gridNote(row, column), this._buttonColour(id, colours));
+        leds.set(orientedGridNote(device.orientation, row, column), this._buttonColour(id, colours));
       }
       for (let row = 0; row < 8; row++) {
         const id = layout.sideButtons[row];
         const colours = id ? paletteForControl(id, layout.page.colour) : null;
-        leds.set(sideNote(row), id ? this._buttonColour(id, colours) : 0);
+        leds.set(orientedSideNote(device.orientation, row), id ? this._buttonColour(id, colours) : 0);
       }
       // Explicitly clear every unused grid cell.
       for (let row = 0; row < 8; row++) {
@@ -881,6 +967,11 @@
     pageTone,
     decodeControl,
     gridNote,
+    normalizeOrientation,
+    orientControl,
+    orientedGridNote,
+    orientedSideNote,
+    orientedTopNote,
     sideNote,
     isLaunchpadMiniMk3Port,
   };

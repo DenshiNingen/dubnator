@@ -96,12 +96,13 @@ function launchpadControlDescription(id, control, metered) {
   return `Enables or disables ${label}. A bright LED means it is active.`;
 }
 
-function LaunchpadBoard({ role, manager, catalogMap, devices, singleDevice, pageIndex, onPageChange }) {
+function LaunchpadBoard({ role, manager, catalogMap, devices, singleDevice, pageIndex, onPageChange, onToggleOrientation }) {
   const [hovered, setHovered] = useLaunchpadState(null);
   const roleInfo = LAUNCHPAD_ROLES[role];
   const pages = manager.pages[role];
   const layout = manager.describePage(role, pageIndex);
   const connected = devices.find((device) => device.role === roleInfo.status);
+  const rotated = connected?.orientation === "ccw";
   const singleAvailable = !!singleDevice?.connected;
   const gridButtons = new Map(layout.gridButtons.map((button) => [`${button.row}:${button.column}`, button.id]));
   const meterRanges = new Set(layout.meterRanges);
@@ -130,7 +131,7 @@ function LaunchpadBoard({ role, manager, catalogMap, devices, singleDevice, page
       title: surfacePage.name,
       tone: surfacePage.tone,
       description: singleDevice
-        ? `Short press opens ${surfacePage.name}.${holdRole ? ` Hold the physical ${holdRole.arrow} button to activate the ${holdRole.status} surface.` : ""}`
+        ? `Short press opens ${surfacePage.name}.${holdRole ? ` Hold ${rotated ? `top button ${index + 1}` : `the physical ${holdRole.arrow} button`} to activate the ${holdRole.status} surface.` : ""}`
         : `Top button ${index + 1}. Opens ${surfacePage.name} on this Launchpad without changing the other device.`,
     });
   };
@@ -148,20 +149,58 @@ function LaunchpadBoard({ role, manager, catalogMap, devices, singleDevice, page
       ? `${inspector.metered ? "FADER + VU" : "FADER"} · STEP ${8 - inspector.row}/8`
       : "BUTTON";
 
+  const renderSidePad = (row) => {
+    const id = layout.sideButtons[row];
+    const label = id ? catalogMap.get(id)?.label || id : "";
+    const tone = id ? manager.controlTone(id, layout.colour) : "";
+    const inspected = !!id && hovered?.id === id;
+    return (
+      <div
+        key={`side:${row}`}
+        className={`lp-help-pad is-side${tone ? ` lp-tone-${tone}` : ""}${id ? " is-button" : " is-empty"}${inspected ? " is-inspected is-hover-step" : ""}`}
+        onMouseEnter={() => id && inspectControl(id, "button", row, 8)}
+        onMouseLeave={() => setHovered(null)}
+        onFocus={() => id && inspectControl(id, "button", row, 8)}
+        onBlur={() => setHovered(null)}
+        tabIndex={id ? 0 : -1}
+        role={id ? "img" : undefined}
+        aria-label={id ? `${label}. ${launchpadControlDescription(id, catalogMap.get(id), false)}` : undefined}
+        title={label}
+      >
+        {id ? <b>{launchpadShortLabel(label)}</b> : null}
+      </div>
+    );
+  };
+
+  const sideColumnLabel = <div key="side-label"><b>9</b><span>SIDE</span></div>;
+
   return (
-    <article className={`lp-help-board lp-theme-${layout.tone}`}>
+    <article className={`lp-help-board lp-theme-${layout.tone}${rotated ? " is-ccw" : ""}`}>
       <div className="lp-help-board-heading">
         <div>
-          <div className="lp-help-kicker mono">{roleInfo.eyebrow}</div>
+          <div className="lp-help-kicker mono">{roleInfo.eyebrow}{rotated ? " · ROTATED CCW" : ""}</div>
           <h4>{roleInfo.title}</h4>
         </div>
-        <span className={`lp-help-connection${connected?.connected ? " is-connected" : singleAvailable ? " is-available" : ""}`}>
-          {connected?.connected
-            ? (singleDevice ? "● ACTIVE" : "● CONNECTED")
-            : singleAvailable
-              ? `HOLD ${roleInfo.arrow}`
-              : "○ PREVIEW"}
-        </span>
+        <div className="lp-help-board-status">
+          {connected?.connected && onToggleOrientation && (
+            <button
+              className={`lp-help-orientation${rotated ? " active" : ""}`}
+              onClick={() => onToggleOrientation(connected.inputId)}
+              title={rotated
+                ? "This Launchpad is mapped for a physical 90° counter-clockwise rotation. Click for straight."
+                : "This Launchpad is mapped straight. Click for a physical 90° counter-clockwise rotation."}
+            >
+              {rotated ? "↺ 90°" : "0°"}
+            </button>
+          )}
+          <span className={`lp-help-connection${connected?.connected ? " is-connected" : singleAvailable ? " is-available" : ""}`}>
+            {connected?.connected
+              ? (singleDevice ? "● ACTIVE" : "● CONNECTED")
+              : singleAvailable
+                ? `HOLD ${roleInfo.arrow}`
+                : "○ PREVIEW"}
+          </span>
+        </div>
       </div>
 
       <div className="lp-help-device">
@@ -189,7 +228,7 @@ function LaunchpadBoard({ role, manager, catalogMap, devices, singleDevice, page
         <div className="lp-help-current">
           <span className="lp-help-led"></span>
           <strong>{layout.name}</strong>
-          <span>{connected?.name || singleDevice?.name || roleInfo.status}</span>
+          <span>{connected?.name || singleDevice?.name || roleInfo.status}{rotated ? " · ↺ 90° CCW" : ""}</span>
         </div>
 
         <div className={`lp-help-inspector lp-tone-${inspector.tone || layout.tone}`}>
@@ -204,6 +243,7 @@ function LaunchpadBoard({ role, manager, catalogMap, devices, singleDevice, page
         </div>
 
         <div className="lp-help-column-labels">
+          {rotated && sideColumnLabel}
           {Array.from({ length: 8 }, (_, column) => {
             const id = layout.ranges[column];
             const label = id ? catalogMap.get(id)?.label || id : "Button pads";
@@ -221,12 +261,13 @@ function LaunchpadBoard({ role, manager, catalogMap, devices, singleDevice, page
               </div>
             );
           })}
-          <div><b>9</b><span>SIDE</span></div>
+          {!rotated && sideColumnLabel}
         </div>
 
         <div className="lp-help-grid">
           {Array.from({ length: 8 }, (_, row) => (
             <React.Fragment key={row}>
+              {rotated && renderSidePad(row)}
               {Array.from({ length: 8 }, (_, column) => {
                 const range = layout.ranges[column];
                 const button = gridButtons.get(`${row}:${column}`);
@@ -259,27 +300,7 @@ function LaunchpadBoard({ role, manager, catalogMap, devices, singleDevice, page
                   </div>
                 );
               })}
-              {(() => {
-                const id = layout.sideButtons[row];
-                const label = id ? catalogMap.get(id)?.label || id : "";
-                const tone = id ? manager.controlTone(id, layout.colour) : "";
-                const inspected = !!id && hovered?.id === id;
-                return (
-                  <div
-                    className={`lp-help-pad is-side${tone ? ` lp-tone-${tone}` : ""}${id ? " is-button" : " is-empty"}${inspected ? " is-inspected is-hover-step" : ""}`}
-                    onMouseEnter={() => id && inspectControl(id, "button", row, 8)}
-                    onMouseLeave={() => setHovered(null)}
-                    onFocus={() => id && inspectControl(id, "button", row, 8)}
-                    onBlur={() => setHovered(null)}
-                    tabIndex={id ? 0 : -1}
-                    role={id ? "img" : undefined}
-                    aria-label={id ? `${label}. ${launchpadControlDescription(id, catalogMap.get(id), false)}` : undefined}
-                    title={label}
-                  >
-                    {id ? <b>{launchpadShortLabel(label)}</b> : null}
-                  </div>
-                );
-              })()}
+              {!rotated && renderSidePad(row)}
             </React.Fragment>
           ))}
         </div>
@@ -288,7 +309,7 @@ function LaunchpadBoard({ role, manager, catalogMap, devices, singleDevice, page
   );
 }
 
-function LaunchpadLayoutHelp({ catalog, devices = [], onSelectPage, onSelectRole }) {
+function LaunchpadLayoutHelp({ catalog, devices = [], onSelectPage, onSelectRole, onToggleOrientation }) {
   const [previewPages, setPreviewPages] = useLaunchpadState([0, 0]);
   const manager = useLaunchpadMemo(() => {
     const LP = window.DubnatorLaunchpad;
@@ -353,6 +374,7 @@ function LaunchpadLayoutHelp({ catalog, devices = [], onSelectPage, onSelectRole
               singleDevice={singleDevice}
               pageIndex={pageIndex}
               onPageChange={(page) => selectPage(role, page)}
+              onToggleOrientation={onToggleOrientation}
             />
           );
         })}
@@ -371,7 +393,7 @@ function LaunchpadLayoutHelp({ catalog, devices = [], onSelectPage, onSelectRole
 
       <div className="lp-help-note mono">
         {singleDevice
-          ? "USE THE MIX / FX SWITCH ABOVE OR HOLD THE PHYSICAL ← / → BUTTON · TOP BUTTONS CHANGE THE REAL LAUNCHPAD PAGE · THE LOGO IS GREEN FOR MIX AND BLUE FOR FX · "
+          ? `USE THE MIX / FX SWITCH ABOVE OR HOLD ${singleDevice.rotated ? "TOP BUTTON 3 / 4" : "THE PHYSICAL ← / → BUTTON"} · TOP BUTTONS CHANGE THE REAL LAUNCHPAD PAGE · THE LOGO IS GREEN FOR MIX AND BLUE FOR FX · `
           : "CLICK A TOP BUTTON TO CHANGE THAT PHYSICAL LAUNCHPAD · EACH LAUNCHPAD CHANGES PAGE INDEPENDENTLY · "}
         HOVER A FADER ROW TO HIGHLIGHT ITS FULL COLUMN · BRIGHT LED = ACTIVE · WHITE LED = EXACT FADER POSITION
       </div>

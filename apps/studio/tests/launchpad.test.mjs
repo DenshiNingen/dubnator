@@ -23,6 +23,10 @@ const {
   controlTone,
   decodeControl,
   gridNote,
+  orientControl,
+  orientedGridNote,
+  orientedSideNote,
+  orientedTopNote,
   sideNote,
 } = sandbox.window.DubnatorLaunchpad;
 
@@ -377,6 +381,90 @@ test("decodes Novation's CC messages for the right-hand button column", () => {
   assert.equal(sideRelease.area, "side");
   assert.equal(sideRelease.row, 0);
   assert.equal(sideRelease.pressed, false);
+});
+
+test("90° CCW orientation normalizes the grid, top row and outer column", () => {
+  const grid = orientControl({ area: "grid", row: 1, column: 2, pressed: true }, "ccw");
+  assert.deepEqual(
+    { area: grid.area, row: grid.row, column: grid.column, pressed: grid.pressed },
+    { area: "grid", row: 5, column: 1, pressed: true },
+  );
+  const physicalSide = orientControl({ area: "side", row: 4, pressed: true }, "ccw");
+  assert.deepEqual(
+    { area: physicalSide.area, index: physicalSide.index, pressed: physicalSide.pressed },
+    { area: "top", index: 4, pressed: true },
+  );
+  const physicalTop = orientControl({ area: "top", index: 2, pressed: false }, "ccw");
+  assert.deepEqual(
+    { area: physicalTop.area, row: physicalTop.row, pressed: physicalTop.pressed },
+    { area: "side", row: 5, pressed: false },
+  );
+  assert.equal(orientedGridNote("ccw", 5, 1), gridNote(1, 2));
+  assert.equal(orientedTopNote("ccw", 4), sideNote(4));
+  assert.equal(orientedSideNote("ccw", 5), 93);
+});
+
+test("a physically rotated left unit keeps controls and LED feedback upright", () => {
+  const sent = [];
+  const fired = [];
+  const orientationChanges = [];
+  const manager = new LaunchpadMiniMk3Manager({
+    catalog,
+    send: (outputId, message) => sent.push({ outputId, message: [...message] }),
+    onControl: (id, value, event) => fired.push({ id, value, event }),
+    onOrientationChange: (change) => orientationChanges.push(change),
+  });
+  manager.setPorts(ports());
+  assert.equal(manager.setOrientation("in-a", "ccw", "help"), true);
+  assert.equal(manager.getStatus()[0].orientation, "ccw");
+  assert.equal(manager.getStatus()[0].rotated, true);
+
+  // The original top-right button is now the top action in the outer-left
+  // column. On MIX it remains Deck A Play/Pause.
+  manager.handleMidi({ deviceId: "in-a", data: [0xb0, 98, 127] });
+  assert.equal(fired.at(-1).id, "deckA.play");
+
+  // A world-space vertical fader becomes one horizontal row in the unrotated
+  // MIDI coordinate system; the transform restores its logical column/value.
+  manager.handleMidi({ deviceId: "in-a", data: [0x90, gridNote(0, 7), 127] });
+  assert.equal(fired.at(-1).id, "deckA.gain");
+  assert.equal(fired.at(-1).value, 1);
+
+  manager.sync({ "deckA.play": 1, "deckA.gain": 1 });
+  const frame = sent.filter(({ outputId, message }) => outputId === "out-a" && message[6] === 3).at(-1).message;
+  assert.equal(frame.length, 251, "rotation still renders all 81 LEDs in one frame");
+  assert.equal(frameColour(frame, sideNote(0)), PALETTES.neutral.bright, "page 1 moves to the physical top row");
+  assert.equal(frameColour(frame, 98), PALETTES.green.bright, "outer-left action LED follows Play");
+  for (let column = 0; column < 8; column++) {
+    assert.equal(
+      frameColour(frame, gridNote(0, column)),
+      PALETTES.green.bright,
+      `rotated gain fader lights physical row column ${column + 1}`,
+    );
+  }
+
+  // The original right column is physically on top after a CCW rotation.
+  manager.handleMidi({ deviceId: "in-a", data: [0xb0, sideNote(1), 127] });
+  assert.equal(manager.getStatus()[0].pageName, "DECK A");
+  assert.deepEqual(
+    {
+      inputId: orientationChanges.at(-1).inputId,
+      orientation: orientationChanges.at(-1).orientation,
+      source: orientationChanges.at(-1).source,
+    },
+    { inputId: "in-a", orientation: "ccw", source: "help" },
+  );
+
+  manager.setReverse(true);
+  const rotatedDevice = manager.getStatus().find(({ inputId }) => inputId === "in-a");
+  assert.equal(rotatedDevice.role, "RIGHT / FX");
+  assert.equal(rotatedDevice.orientation, "ccw", "orientation follows the physical device when roles swap");
+  manager.setPorts(ports());
+  assert.equal(
+    manager.getStatus().find(({ inputId }) => inputId === "in-a").orientation,
+    "ccw",
+    "orientation survives a MIDI port refresh",
+  );
 });
 
 test("every button in all 16 pages dispatches from its physical pad", () => {
