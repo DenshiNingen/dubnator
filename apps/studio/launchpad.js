@@ -9,6 +9,8 @@
   const PROGRAMMER_MODE = [...SYSEX, 0x0e, 0x01, 0xf7];
   const LIVE_MODE = [...SYSEX, 0x0e, 0x00, 0xf7];
   const FEEDBACK_EXTERNAL_ONLY = [...SYSEX, 0x0a, 0x00, 0x01, 0xf7];
+  const SINGLE_ROLE_HOLD_MS = 450;
+  const SINGLE_ROLE_BUTTONS = { 2: 0, 3: 1 }; // Physical top-row ← / →.
 
   // Launchpad palette indices. Colour now describes function, while brightness
   // describes value/state. That makes a page readable before any pad is
@@ -370,7 +372,11 @@
       this.onControl = options.onControl || (() => {});
       this.send = options.send || (() => {});
       this.onStatus = options.onStatus || (() => {});
+      this.onRoleChange = options.onRoleChange || (() => {});
       this.now = options.now || (() => Date.now());
+      this.schedule = options.schedule || ((callback, delay) => globalThis.setTimeout(callback, delay));
+      this.cancelSchedule = options.cancelSchedule || ((timer) => globalThis.clearTimeout(timer));
+      this.roleHoldMs = Number(options.roleHoldMs) || SINGLE_ROLE_HOLD_MS;
       this.values = {};
       this.meters = {};
       this.meterPeaks = new Map();
@@ -382,8 +388,9 @@
     setReverse(reverse) {
       this.reverse = !!reverse;
       this.devices.forEach((device, index) => {
+        this._cancelRoleHold(device);
         device.role = this.reverse ? 1 - (index % 2) : index % 2;
-        device.page = 0;
+        device.page = device.rolePages[device.role] || 0;
         device.lastFrame = "";
         this._configure(device);
       });
@@ -401,6 +408,10 @@
         name: input.name || `Launchpad Mini MK3 ${index + 1}`,
         role: this.reverse ? 1 - (index % 2) : index % 2,
         page: 0,
+        rolePages: [0, 0],
+        roleHold: null,
+        roleHoldTimer: null,
+        activeMomentaries: new Map(),
         lastFrame: "",
       }));
       for (const device of this.devices) this._configure(device);
@@ -410,6 +421,8 @@
 
     restoreLiveMode() {
       for (const device of this.devices) {
+        this._cancelRoleHold(device);
+        this._releaseMomentaries(device, "disconnect");
         if (device.outputId) this.send(device.outputId, LIVE_MODE);
       }
     }
@@ -435,6 +448,8 @@
           name: device.name,
           connected: !!device.outputId,
           role: device.role === 0 ? "LEFT / MIX" : "RIGHT / FX",
+          roleIndex: device.role,
+          single: this.devices.length === 1,
           page: device.page,
           pageName: p.name,
           ranges: [...p.ranges],
@@ -486,6 +501,104 @@
       }
     }
 
+    _cancelRoleHold(device) {
+      if (!device) return;
+      if (device.roleHoldTimer !== null && device.roleHoldTimer !== undefined) {
+        this.cancelSchedule(device.roleHoldTimer);
+      }
+      device.roleHold = null;
+      device.roleHoldTimer = null;
+    }
+
+    _releaseMomentaries(device, source) {
+      if (!device?.activeMomentaries?.size) return;
+      for (const id of new Set(device.activeMomentaries.values())) {
+        this.values[id] = 0;
+        this.onControl(id, 0, {
+          type: "button",
+          press: false,
+          device: device.inputId,
+          source,
+        });
+      }
+      device.activeMomentaries.clear();
+    }
+
+    _selectPage(device, pageIndex) {
+      if (pageIndex < 0 || pageIndex >= this.pages[device.role].length) return;
+      device.page = pageIndex;
+      device.rolePages[device.role] = pageIndex;
+      device.lastFrame = "";
+      this.render(device, true);
+      this._status();
+    }
+
+    selectPage(role, pageIndex, source = "ui") {
+      const nextRole = role === 1 ? 1 : 0;
+      const nextPage = Number(pageIndex);
+      if (!Number.isInteger(nextPage) || nextPage < 0 || nextPage >= this.pages[nextRole].length) {
+        return false;
+      }
+      if (this.devices.length === 1 && this.devices[0].role !== nextRole) {
+        this.setSingleRole(nextRole, source);
+      }
+      const device = this.devices.find((candidate) => candidate.role === nextRole);
+      if (!device) return false;
+      this._selectPage(device, nextPage);
+      return true;
+    }
+
+    setSingleRole(role, source = "ui") {
+      if (this.devices.length !== 1) return false;
+      const device = this.devices[0];
+      const nextRole = role === 1 ? 1 : 0;
+      const changed = device.role !== nextRole;
+      this._cancelRoleHold(device);
+      device.role = nextRole;
+      device.page = device.rolePages[nextRole] || 0;
+      device.lastFrame = "";
+      this.reverse = nextRole === 1;
+      this.render(device, true);
+      this._status();
+      if (changed) {
+        this.onRoleChange({
+          role: nextRole,
+          roleName: nextRole === 0 ? "LEFT / MIX" : "RIGHT / FX",
+          reversed: this.reverse,
+          source,
+        });
+      }
+      return true;
+    }
+
+    _handleTop(device, control) {
+      const singleRole = this.devices.length === 1
+        ? SINGLE_ROLE_BUTTONS[control.index]
+        : undefined;
+      if (singleRole === undefined) {
+        if (control.pressed) this._selectPage(device, control.index);
+        return;
+      }
+
+      if (control.pressed) {
+        this._cancelRoleHold(device);
+        const hold = { index: control.index, role: singleRole };
+        device.roleHold = hold;
+        device.lastFrame = "";
+        this.render(device, true);
+        device.roleHoldTimer = this.schedule(() => {
+          if (device.roleHold !== hold) return;
+          this.setSingleRole(hold.role, "hardware-hold");
+        }, this.roleHoldMs);
+        return;
+      }
+
+      const hold = device.roleHold;
+      if (!hold || hold.index !== control.index) return;
+      this._cancelRoleHold(device);
+      this._selectPage(device, control.index);
+    }
+
     handleMidi(payload) {
       const data = payload && payload.data ? payload.data : payload;
       const deviceId = payload && (payload.deviceId || payload.device_id);
@@ -494,16 +607,29 @@
       const control = decodeControl(data);
       if (!control) return true;
       if (control.area === "top") {
-        if (control.pressed && control.index < this.pages[device.role].length) {
-          device.page = control.index;
-          device.lastFrame = "";
-          this.render(device, true);
-          this._status();
-        }
+        this._handleTop(device, control);
         return true;
       }
 
       const layout = this._layout(device);
+      const physicalKey = control.area === "grid"
+        ? `grid:${control.row}:${control.column}`
+        : control.area === "side"
+          ? `side:${control.row}`
+          : null;
+      if (!control.pressed && physicalKey && device.activeMomentaries.has(physicalKey)) {
+        const heldTarget = device.activeMomentaries.get(physicalKey);
+        device.activeMomentaries.delete(physicalKey);
+        this.values[heldTarget] = 0;
+        this.onControl(heldTarget, 0, {
+          type: "button",
+          press: false,
+          device: device.inputId,
+          source: "physical-release",
+        });
+        this.render(device);
+        return true;
+      }
       let target = null;
       if (control.area === "grid" && control.column < layout.ranges.length) {
         if (!control.pressed) return true;
@@ -555,6 +681,7 @@
       const meta = this.meta.get(target) || { type: "button", momentary: false };
       if (meta.momentary === true) {
         this.values[target] = control.pressed ? 1 : 0;
+        if (control.pressed && physicalKey) device.activeMomentaries.set(physicalKey, target);
         this.onControl(target, control.pressed ? 1 : 0, {
           type: "button",
           press: control.pressed,
@@ -701,6 +828,9 @@
         const colours = PALETTES[tone] || PALETTES.neutral;
         leds.set(91 + i, i === device.page ? colours.bright : colours.dim);
       }
+      if (this.devices.length === 1 && device.roleHold) {
+        leds.set(91 + device.roleHold.index, PALETTES.neutral.bright);
+      }
       leds.set(99, device.role === 0 ? PALETTES.green.bright : PALETTES.blue.bright);
 
       for (let column = 0; column < layout.ranges.length; column++) {
@@ -745,6 +875,8 @@
     PALETTES,
     PAGE_TONES,
     METER_CONTROL_IDS,
+    SINGLE_ROLE_HOLD_MS,
+    SINGLE_ROLE_BUTTONS,
     controlTone,
     pageTone,
     decodeControl,

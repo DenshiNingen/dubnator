@@ -72,18 +72,21 @@ own limiter) · a dub filter with a hands-free auto-sweep · a dub siren · a 12
 sampler with a built-in sound-system kit · a WAV/AIFF recorder · and **total MIDI
 control** — Cmd+Shift+click any knob or fader to MIDI-learn it.
 
-## Two Launchpad Mini MK3s
+## One or two Launchpad Mini MK3s
 
-Dubnator has a built-in, bidirectional surface for two Novation Launchpad Mini
-MK3s. It uses each device's **MIDI** port (not its DAW port), enters Programmer
-Mode automatically, and restores Live Mode when the app closes.
+Dubnator has a built-in, bidirectional surface for one or two Novation Launchpad
+Mini MK3s. It uses each device's **MIDI** port (not its DAW port), enters
+Programmer Mode automatically, and restores Live Mode when the app closes.
 
-- Give the two units different Device IDs: hold **User** while plugging each one
-  in, then select a different pad in the top two rows.
+- When using two units, give them different Device IDs: hold **User** while
+  plugging each one in, then select a different pad in the top two rows.
 - In the native app, the controllers are detected automatically. In the browser,
   open **MIDI → Enable MIDI** once to grant Web MIDI + SysEx access.
 - The first unit is **MIX / DECKS / INPUTS / ISOLATOR / SIREN / MASTER**; the
   second is **ECHO / REVERB / FILTER / SAMPLES / ADVANCED ISOLATOR / EQ**.
+- With one unit, hold the physical top-row **←** button for the MIX surface or
+  **→** for the FX surface. A short press still selects that button's normal page,
+  so all 16 pages remain directly accessible.
 - The eight top buttons select pages. Grid columns are LED faders; the remaining
   grid and side pads are stateful actions. Use **MIDI → Swap L/R** if the physical
   order is reversed.

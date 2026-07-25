@@ -5,12 +5,14 @@ const { useMemo: useLaunchpadMemo, useState: useLaunchpadState } = React;
 const LAUNCHPAD_ROLES = [
   {
     status: "LEFT / MIX",
+    arrow: "←",
     eyebrow: "LEFT CONTROLLER",
     title: "Mix · Siren",
     summary: "Mix, decks, inputs, isolator, siren and master controls.",
   },
   {
     status: "RIGHT / FX",
+    arrow: "→",
     eyebrow: "RIGHT CONTROLLER",
     title: "FX · EQ",
     summary: "Echo, reverb, filter, samples, advanced isolator and EQ controls.",
@@ -59,9 +61,9 @@ function launchpadControlDescription(id, control, metered) {
     "music.echo": "Enables or disables the music mix send to echo.",
     "aux.rev": "Enables or disables the AUX send to reverb.",
     "aux.echo": "Enables or disables the AUX send to echo.",
-    "xfade.a": "Lleva inmediatamente el crossfader al lado A.",
-    "xfade.center": "Centra exactamente el crossfader.",
-    "xfade.b": "Lleva inmediatamente el crossfader al lado B.",
+    "xfade.a": "Moves the crossfader immediately to side A.",
+    "xfade.center": "Centers the crossfader exactly.",
+    "xfade.b": "Moves the crossfader immediately to side B.",
     "echo.panic": "Immediately clears the active echo and reverb tails.",
     "echo.tap": "Sets echo tempo manually from repeated taps.",
     "recorder.toggle": "Starts or stops master recording.",
@@ -94,12 +96,13 @@ function launchpadControlDescription(id, control, metered) {
   return `Enables or disables ${label}. A bright LED means it is active.`;
 }
 
-function LaunchpadBoard({ role, manager, catalogMap, devices, pageIndex, onPageChange }) {
+function LaunchpadBoard({ role, manager, catalogMap, devices, singleDevice, pageIndex, onPageChange }) {
   const [hovered, setHovered] = useLaunchpadState(null);
   const roleInfo = LAUNCHPAD_ROLES[role];
   const pages = manager.pages[role];
   const layout = manager.describePage(role, pageIndex);
   const connected = devices.find((device) => device.role === roleInfo.status);
+  const singleAvailable = !!singleDevice?.connected;
   const gridButtons = new Map(layout.gridButtons.map((button) => [`${button.row}:${button.column}`, button.id]));
   const meterRanges = new Set(layout.meterRanges);
 
@@ -120,12 +123,15 @@ function LaunchpadBoard({ role, manager, catalogMap, devices, pageIndex, onPageC
   };
 
   const inspectPage = (surfacePage, index) => {
+    const holdRole = index === 2 ? LAUNCHPAD_ROLES[0] : index === 3 ? LAUNCHPAD_ROLES[1] : null;
     setHovered({
       kind: "page",
       page: index,
       title: surfacePage.name,
       tone: surfacePage.tone,
-      description: `Top button ${index + 1}. Opens ${surfacePage.name} on this Launchpad without changing the other device.`,
+      description: singleDevice
+        ? `Short press opens ${surfacePage.name}.${holdRole ? ` Hold the physical ${holdRole.arrow} button to activate the ${holdRole.status} surface.` : ""}`
+        : `Top button ${index + 1}. Opens ${surfacePage.name} on this Launchpad without changing the other device.`,
     });
   };
 
@@ -149,8 +155,12 @@ function LaunchpadBoard({ role, manager, catalogMap, devices, pageIndex, onPageC
           <div className="lp-help-kicker mono">{roleInfo.eyebrow}</div>
           <h4>{roleInfo.title}</h4>
         </div>
-        <span className={`lp-help-connection${connected?.connected ? " is-connected" : ""}`}>
-          {connected?.connected ? "● CONNECTED" : "○ PREVIEW"}
+        <span className={`lp-help-connection${connected?.connected ? " is-connected" : singleAvailable ? " is-available" : ""}`}>
+          {connected?.connected
+            ? (singleDevice ? "● ACTIVE" : "● CONNECTED")
+            : singleAvailable
+              ? `HOLD ${roleInfo.arrow}`
+              : "○ PREVIEW"}
         </span>
       </div>
 
@@ -179,7 +189,7 @@ function LaunchpadBoard({ role, manager, catalogMap, devices, pageIndex, onPageC
         <div className="lp-help-current">
           <span className="lp-help-led"></span>
           <strong>{layout.name}</strong>
-          <span>{connected ? connected.name : roleInfo.status}</span>
+          <span>{connected?.name || singleDevice?.name || roleInfo.status}</span>
         </div>
 
         <div className={`lp-help-inspector lp-tone-${inspector.tone || layout.tone}`}>
@@ -278,8 +288,8 @@ function LaunchpadBoard({ role, manager, catalogMap, devices, pageIndex, onPageC
   );
 }
 
-function LaunchpadLayoutHelp({ catalog, devices = [] }) {
-  const [pageIndexes, setPageIndexes] = useLaunchpadState([0, 0]);
+function LaunchpadLayoutHelp({ catalog, devices = [], onSelectPage, onSelectRole }) {
+  const [previewPages, setPreviewPages] = useLaunchpadState([0, 0]);
   const manager = useLaunchpadMemo(() => {
     const LP = window.DubnatorLaunchpad;
     return LP ? new LP.LaunchpadMiniMk3Manager({ catalog }) : null;
@@ -288,36 +298,64 @@ function LaunchpadLayoutHelp({ catalog, devices = [] }) {
     () => new Map(catalog.map((control) => [control.id, control])),
     [catalog],
   );
+  const singleDevice = devices.length === 1 ? devices[0] : null;
+  const visibleRoles = singleDevice ? [singleDevice.roleIndex === 1 ? 1 : 0] : [0, 1];
   if (!manager) return null;
 
   const selectPage = (role, page) => {
-    setPageIndexes((current) => current.map((value, index) => index === role ? page : value));
+    setPreviewPages((current) => current.map((value, index) => index === role ? page : value));
+    if (onSelectPage) onSelectPage(role, page);
   };
 
   return (
     <section className="lp-help">
       <div className="lp-help-heading">
         <div>
-          <div className="lp-help-kicker mono">DUAL CONTROL SURFACE · LIVE REFERENCE</div>
+          <div className="lp-help-kicker mono">
+            {singleDevice ? "ONE-CONTROLLER MODE · ALL 16 PAGES" : "DUAL CONTROL SURFACE · LIVE REFERENCE"}
+          </div>
           <h3>Launchpad Mini MK3 layouts</h3>
         </div>
-        <div className="lp-help-hover-hint mono">
-          HOVER / FOCUS A PAD → HIGHLIGHT + DESCRIPTION
+        <div className="lp-help-heading-actions">
+          {singleDevice && (
+            <div className="lp-help-role-tabs" aria-label="Launchpad surface">
+              {LAUNCHPAD_ROLES.map((roleInfo, role) => (
+                <button
+                  key={roleInfo.status}
+                  className={singleDevice.roleIndex === role ? "active" : ""}
+                  onClick={() => onSelectRole && onSelectRole(role)}
+                  title={`Show ${roleInfo.status} on the connected Launchpad`}
+                >
+                  {roleInfo.arrow} {role === 0 ? "MIX" : "FX"}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="lp-help-hover-hint mono">
+            {singleDevice
+              ? "LIVE VIEW · HARDWARE AND HELP STAY IN SYNC"
+              : "LIVE VIEW · CLICK A PAGE TO CHANGE ITS LAUNCHPAD"}
+          </div>
         </div>
       </div>
 
-      <div className="lp-help-boards">
-        {[0, 1].map((role) => (
-          <LaunchpadBoard
-            key={role}
-            role={role}
-            manager={manager}
-            catalogMap={catalogMap}
-            devices={devices}
-            pageIndex={pageIndexes[role]}
-            onPageChange={(page) => selectPage(role, page)}
-          />
-        ))}
+      <div className={`lp-help-boards${singleDevice ? " is-single" : ""}`}>
+        {visibleRoles.map((role) => {
+          const connected = devices.find((device) => device.roleIndex === role);
+          const pageIndex = connected?.page ?? previewPages[role];
+          return (
+            <LaunchpadBoard
+              key={role}
+              role={role}
+              manager={manager}
+              catalogMap={catalogMap}
+              devices={devices}
+              singleDevice={singleDevice}
+              pageIndex={pageIndex}
+              onPageChange={(page) => selectPage(role, page)}
+            />
+          );
+        })}
       </div>
 
       <div className="lp-help-colour-key mono">
@@ -332,9 +370,10 @@ function LaunchpadLayoutHelp({ catalog, devices = [] }) {
       </div>
 
       <div className="lp-help-note mono">
-        CLICK A TOP BUTTON TO PREVIEW ITS PAGE · EACH LAUNCHPAD CHANGES PAGE INDEPENDENTLY ·
-        HOVER A FADER ROW TO HIGHLIGHT ITS FULL COLUMN · BRIGHT LED = ACTIVE ·
-        WHITE LED = EXACT FADER POSITION
+        {singleDevice
+          ? "USE THE MIX / FX SWITCH ABOVE OR HOLD THE PHYSICAL ← / → BUTTON · TOP BUTTONS CHANGE THE REAL LAUNCHPAD PAGE · THE LOGO IS GREEN FOR MIX AND BLUE FOR FX · "
+          : "CLICK A TOP BUTTON TO CHANGE THAT PHYSICAL LAUNCHPAD · EACH LAUNCHPAD CHANGES PAGE INDEPENDENTLY · "}
+        HOVER A FADER ROW TO HIGHLIGHT ITS FULL COLUMN · BRIGHT LED = ACTIVE · WHITE LED = EXACT FADER POSITION
       </div>
     </section>
   );

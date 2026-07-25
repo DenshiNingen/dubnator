@@ -2463,6 +2463,12 @@ input[type="range"]:disabled { opacity: 0.35; }
   align-items: center;
   margin-bottom: 6px;
 }
+.lp-help-heading-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
 .lp-help-hover-hint {
   padding: 5px 8px;
   border: 1px solid rgba(255,255,255,0.11);
@@ -2478,6 +2484,9 @@ input[type="range"]:disabled { opacity: 0.35; }
   justify-content: center;
   align-items: start;
   gap: 10px;
+}
+.lp-help-boards.is-single {
+  grid-template-columns: minmax(320px, 430px);
 }
 .lp-help-board {
   min-width: 0;
@@ -2503,6 +2512,9 @@ input[type="range"]:disabled { opacity: 0.35; }
 }
 .lp-help-connection.is-connected {
   color: #55ef7f;
+}
+.lp-help-connection.is-available {
+  color: #ffd84d;
 }
 .lp-help-board .lp-help-device {
   padding: 7px;

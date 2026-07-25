@@ -20,6 +20,7 @@ const { KeyboardMap } = window.DubnatorKeyboardMap;
 const { LaunchpadLayoutHelp } = window.DubnatorLaunchpadHelp;
 const PlaylistModal = window.DubnatorPlaylistModal;
 const MIDI_CONTROLS = window.DubnatorMidiControls;
+const { TapTempoTracker } = window.DubnatorTapTempo;
 
 // EQ routing selector → which EQ units are engaged. "KILLS ONLY" bypasses
 // both; "10B EQ"/"4B EQ" engage one; "ALL EQS" engages both. Bypassed EQs are
@@ -309,7 +310,7 @@ function App() {
 
   // === echo ===
   const [echo, setEcho] = useState({ send: 0.3, time: 290, fb: 0.35, sat: 0.4, slide: 0.5, dw: 0.5, filter: 2760, filterQ: 1.0, hp: 150, hpOn: false, direct: false, type: 1, wow: 0, robotic: false, sync: false, syncDiv: "1/8", bpm: 120 });
-  const tapRef = useRef([]);
+  const tapTrackerRef = useRef(new TapTempoTracker());
 
   // === dub filter ===
   const [dubFilter, setDubFilter] = useState({ mode: "lp", cutoff: 1000, q: 1.0, route: "music", on: false, sweep: 0, sweepRate: 0.5 });
@@ -440,6 +441,8 @@ function App() {
   const launchpadHelpAvailable = launchpads.some((device) => device.connected);
   const activeHelpView = launchpadHelpAvailable ? helpView : "keyboard";
   const [launchpadReversed, setLaunchpadReversed] = useState(false);
+  const singleLaunchpad = launchpads.length === 1;
+  const singleLaunchpadOnFx = singleLaunchpad && launchpads[0]?.roleIndex === 1;
 
   // === samples ===
   const [flashIdx, setFlashIdx] = useState(-1); // transient: pad lit *right now* by a trigger (auto-clears ~180ms)
@@ -731,19 +734,13 @@ function App() {
 
   // tap tempo for echo
   const tapTempo = () => {
-    const now = performance.now();
-    tapRef.current.push(now);
-    tapRef.current = tapRef.current.filter(t => now - t < 3000);
-    if (tapRef.current.length >= 2) {
-      const intervals = [];
-      for (let i = 1; i < tapRef.current.length; i++) {
-        intervals.push(tapRef.current[i] - tapRef.current[i - 1]);
-      }
-      const avg = intervals.reduce((a, b) => a + b, 0) / intervals.length;
-      const ms = Math.max(30, Math.min(1500, avg));
-      // a tap = one beat; track it as both a raw delay time and a BPM (for sync)
-      setEcho(s => ({ ...s, time: ms, bpm: Math.max(20, Math.min(400, Math.round(60000 / ms))) }));
-    }
+    const result = tapTrackerRef.current.tap(performance.now());
+    if (!result.ready) return;
+    const ms = Math.max(30, Math.min(1500, result.intervalMs));
+    // A tap is one beat. The raw beat drives BPM while the manual delay stays
+    // inside the echo's supported 30–1500 ms range.
+    const bpm = Math.max(20, Math.min(400, Math.round(result.bpm)));
+    setEcho(s => ({ ...s, time: ms, bpm }));
   };
 
   // === Global presets — capture/restore the full console state ===
@@ -889,6 +886,10 @@ function App() {
           if (send) send(outputId, message);
         },
         onStatus: setLaunchpads,
+        onRoleChange: ({ reversed }) => {
+          setLaunchpadReversed(reversed);
+          try { localStorage.setItem("dubnator.launchpad.reverse.v1", reversed ? "1" : "0"); } catch (_) {}
+        },
       });
       try {
         const reversed = localStorage.getItem("dubnator.launchpad.reverse.v1") === "1";
@@ -1202,6 +1203,12 @@ function App() {
     setLaunchpadReversed(reversed);
     if (launchpadRef.current) launchpadRef.current.setReverse(reversed);
     try { localStorage.setItem("dubnator.launchpad.reverse.v1", reversed ? "1" : "0"); } catch (_) {}
+  };
+  const selectLaunchpadHelpPage = (role, page) => {
+    if (launchpadRef.current) launchpadRef.current.selectPage(role, page, "help");
+  };
+  const selectLaunchpadHelpRole = (role) => {
+    if (launchpadRef.current) launchpadRef.current.setSingleRole(role, "help");
   };
   // Current 0..1 value of each MIDI control (inverse of the H setters), used to
   // seed pickup so a physical knob doesn't jump the software value on first move.
@@ -2604,7 +2611,14 @@ function App() {
                 </div>
                 <div className={`help-view help-view-${activeHelpView}`}>
                   {activeHelpView === "launchpads"
-                    ? <LaunchpadLayoutHelp catalog={MIDI_CONTROLS} devices={launchpads} />
+                    ? (
+                      <LaunchpadLayoutHelp
+                        catalog={MIDI_CONTROLS}
+                        devices={launchpads}
+                        onSelectPage={selectLaunchpadHelpPage}
+                        onSelectRole={selectLaunchpadHelpRole}
+                      />
+                    )
                     : <KeyboardMap />}
                 </div>
               </div>
@@ -2655,12 +2669,23 @@ function App() {
                 {midiErr && <div className="warning-strip" style={{ marginBottom: 8 }}>{midiErr}</div>}
                 <div style={{ border: "1px solid rgba(255,59,0,0.35)", borderRadius: 4, padding: 8, marginBottom: 10, background: "rgba(255,59,0,0.04)" }}>
                   <div className="row between" style={{ marginBottom: 5 }}>
-                    <span className="mono" style={{ fontSize: 10, color: "var(--accent)" }}>DUAL LAUNCHPAD MINI MK3</span>
+                    <span className="mono" style={{ fontSize: 10, color: "var(--accent)" }}>
+                      {singleLaunchpad ? "SINGLE LAUNCHPAD MINI MK3" : "DUAL LAUNCHPAD MINI MK3"}
+                    </span>
                     <button className="btn-xs btn" onClick={swapLaunchpads} disabled={!launchpads.length}
-                      title="Exchange the MIX/DECKS and FX/EQ roles between the two physical units">
-                      SWAP L/R{launchpadReversed ? " ●" : ""}
+                      title={singleLaunchpad
+                        ? "Switch this Launchpad between the MIX/SIREN and FX/EQ surfaces"
+                        : "Exchange the MIX/DECKS and FX/EQ roles between the two physical units"}>
+                      {singleLaunchpad
+                        ? (singleLaunchpadOnFx ? "SHOW MIX" : "SHOW FX")
+                        : `SWAP L/R${launchpadReversed ? " ●" : ""}`}
                     </button>
                   </div>
+                  {singleLaunchpad && (
+                    <div className="mono" style={{ marginBottom: 5, fontSize: 8, color: "var(--yellow)", lineHeight: 1.4 }}>
+                      ONE-CONTROLLER MODE · HOLD TOP ← FOR MIX · HOLD TOP → FOR FX · SHORT PRESS SELECTS THE PAGE
+                    </div>
+                  )}
                   {launchpads.length ? launchpads.map((device) => (
                     <div key={device.inputId} style={{ marginTop: 5, paddingTop: 5, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
                       <div className="row between">
@@ -2678,8 +2703,9 @@ function App() {
                     </div>
                   )) : (
                     <div className="mono" style={{ fontSize: 9, color: "var(--text-dim)", lineHeight: 1.45 }}>
-                      Connect both units through their LPMiniMK3 MIDI ports, then press ENABLE MIDI.
-                      The top row selects eight pages; LEDs follow every fader, toggle and selector.
+                      Connect one or two units through their LPMiniMK3 MIDI ports, then press ENABLE MIDI.
+                      With one unit, hold the top ←/→ buttons to switch surfaces. LEDs follow every fader,
+                      toggle and selector.
                     </div>
                   )}
                 </div>
@@ -2809,7 +2835,7 @@ function App() {
               <button className="btn-xs btn"
                 style={{ background: "#3a0000", color: "#ff5252", borderColor: "#5a1010" }}
                 onClick={() => eng.panicFX && eng.panicFX()}>PANIC</button>
-              <span className="panel-sub">{echo.robotic ? "ROBOTIC" : echo.sync ? `${echo.bpm} BPM · ${echo.syncDiv}` : `${echo.time.toFixed(0)} MS · ${(60000 / Math.max(1, echo.time)).toFixed(0)} BPM`}</span>
+              <span className="panel-sub">{echo.robotic ? "ROBOTIC" : echo.sync ? `TEMPO ${echo.bpm} BPM · ${echo.syncDiv}` : `DELAY ${echo.time.toFixed(0)} MS · TEMPO ${(60000 / Math.max(1, echo.time)).toFixed(0)} BPM`}</span>
             </div>
           </div>
           <div className="panel-body">

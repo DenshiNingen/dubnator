@@ -42,6 +42,44 @@ function ports() {
   };
 }
 
+function singlePorts() {
+  return {
+    inputs: [{ id: "in-a", name: "LPMiniMK3 MIDI A" }],
+    outputs: [{ id: "out-a", name: "LPMiniMK3 MIDI A" }],
+  };
+}
+
+function fakeScheduler() {
+  let nextId = 1;
+  const callbacks = new Map();
+  return {
+    schedule(callback) {
+      const id = nextId++;
+      callbacks.set(id, callback);
+      return id;
+    },
+    cancelSchedule(id) {
+      callbacks.delete(id);
+    },
+    fire() {
+      const entry = [...callbacks.entries()].at(-1);
+      assert.ok(entry, "a role-switch hold timer is pending");
+      callbacks.delete(entry[0]);
+      entry[1]();
+    },
+    get size() {
+      return callbacks.size;
+    },
+  };
+}
+
+function frameColour(message, led) {
+  for (let index = 7; index < message.length - 1; index += 3) {
+    if (message[index + 1] === led) return message[index + 2];
+  }
+  return null;
+}
+
 function setup() {
   const sent = [];
   const fired = [];
@@ -195,6 +233,133 @@ test("pairs two MIDI ports, ignores DAW ports and enters Programmer Mode", () =>
   const ledFrames = sent.filter(({ message }) => message[6] === 3);
   assert.equal(ledFrames.length, 2);
   assert.equal(ledFrames[0].message.length, 251, "one SysEx frame contains all 81 LEDs");
+});
+
+test("one Launchpad switches between all 16 pages by holding the top arrows", () => {
+  const timers = fakeScheduler();
+  const sent = [];
+  const fired = [];
+  const roleChanges = [];
+  const manager = new LaunchpadMiniMk3Manager({
+    catalog,
+    schedule: timers.schedule,
+    cancelSchedule: timers.cancelSchedule,
+    send: (outputId, message) => sent.push({ outputId, message: [...message] }),
+    onControl: (id, value, event) => fired.push({ id, value, event }),
+    onRoleChange: (change) => roleChanges.push(change),
+  });
+  manager.setPorts(singlePorts());
+
+  assert.equal(manager.getStatus().length, 1);
+  assert.equal(manager.getStatus()[0].single, true);
+  assert.equal(manager.getStatus()[0].role, "LEFT / MIX");
+
+  // A short press on the physical ← button still selects top-row page 3.
+  manager.handleMidi({ deviceId: "in-a", data: [0xb0, 93, 127] });
+  assert.equal(manager.getStatus()[0].pageName, "MIX", "page waits while the hold gesture is pending");
+  assert.equal(
+    frameColour(sent.at(-1).message, 93),
+    PALETTES.neutral.bright,
+    "the held arrow turns white",
+  );
+  manager.handleMidi({ deviceId: "in-a", data: [0xb0, 93, 0] });
+  assert.equal(timers.size, 0);
+  assert.equal(manager.getStatus()[0].pageName, "DECK B");
+
+  // Holding → switches to FX without consuming any page button.
+  manager.handleMidi({ deviceId: "in-a", data: [0xb0, 94, 127] });
+  timers.fire();
+  manager.handleMidi({ deviceId: "in-a", data: [0xb0, 94, 0] });
+  assert.equal(manager.getStatus()[0].role, "RIGHT / FX");
+  assert.equal(manager.getStatus()[0].pageName, "ECHO");
+  assert.equal(frameColour(sent.at(-1).message, 99), PALETTES.blue.bright);
+
+  // Short → opens right-hand page 4, then both roles remember their page.
+  manager.handleMidi({ deviceId: "in-a", data: [0xb0, 94, 127] });
+  manager.handleMidi({ deviceId: "in-a", data: [0xb0, 94, 0] });
+  assert.equal(manager.getStatus()[0].pageName, "SAMPLES");
+  manager.handleMidi({ deviceId: "in-a", data: [0x90, gridNote(4, 0), 127] });
+  assert.equal(fired.at(-1).id, "samples.gain");
+
+  // A held momentary pad still receives its release after changing surfaces.
+  const sampleTrigger = gridNote(0, 5);
+  manager.handleMidi({ deviceId: "in-a", data: [0x90, sampleTrigger, 127] });
+  assert.deepEqual(
+    { id: fired.at(-1).id, value: fired.at(-1).value },
+    { id: "samples.trigger.0", value: 1 },
+  );
+  manager.handleMidi({ deviceId: "in-a", data: [0xb0, 93, 127] });
+  timers.fire();
+  manager.handleMidi({ deviceId: "in-a", data: [0xb0, 93, 0] });
+  manager.handleMidi({ deviceId: "in-a", data: [0x90, sampleTrigger, 0] });
+  assert.equal(manager.getStatus()[0].role, "LEFT / MIX");
+  assert.equal(manager.getStatus()[0].pageName, "DECK B");
+  assert.deepEqual(
+    { id: fired.at(-1).id, value: fired.at(-1).value },
+    { id: "samples.trigger.0", value: 0 },
+  );
+
+  manager.handleMidi({ deviceId: "in-a", data: [0xb0, 94, 127] });
+  timers.fire();
+  assert.equal(manager.getStatus()[0].role, "RIGHT / FX");
+  assert.equal(manager.getStatus()[0].pageName, "SAMPLES");
+  assert.deepEqual(Array.from(roleChanges, ({ role, source }) => ({ role, source })), [
+    { role: 1, source: "hardware-hold" },
+    { role: 0, source: "hardware-hold" },
+    { role: 1, source: "hardware-hold" },
+  ]);
+
+  const visited = new Set();
+  for (const role of [1, 0]) {
+    if (manager.devices[0].role !== role) {
+      const cc = role === 0 ? 93 : 94;
+      manager.handleMidi({ deviceId: "in-a", data: [0xb0, cc, 127] });
+      timers.fire();
+      manager.handleMidi({ deviceId: "in-a", data: [0xb0, cc, 0] });
+    }
+    for (let pageIndex = 0; pageIndex < 8; pageIndex++) {
+      const cc = 91 + pageIndex;
+      manager.handleMidi({ deviceId: "in-a", data: [0xb0, cc, 127] });
+      manager.handleMidi({ deviceId: "in-a", data: [0xb0, cc, 0] });
+      const status = manager.getStatus()[0];
+      assert.equal(status.roleIndex, role);
+      assert.equal(status.page, pageIndex);
+      visited.add(`${role}:${pageIndex}`);
+    }
+  }
+  assert.equal(visited.size, 16);
+});
+
+test("Help page selection updates the physical surface and its live status", () => {
+  const statuses = [];
+  const sent = [];
+  const roleChanges = [];
+  const manager = new LaunchpadMiniMk3Manager({
+    catalog,
+    send: (outputId, message) => sent.push({ outputId, message: [...message] }),
+    onStatus: (status) => statuses.push(status),
+    onRoleChange: (change) => roleChanges.push(change),
+  });
+  manager.setPorts(singlePorts());
+  const framesBefore = sent.filter(({ message }) => message[6] === 3).length;
+
+  assert.equal(manager.selectPage(0, 5, "help"), true);
+  assert.equal(manager.getStatus()[0].role, "LEFT / MIX");
+  assert.equal(manager.getStatus()[0].pageName, "SIREN");
+
+  assert.equal(manager.selectPage(1, 3, "help"), true);
+  assert.equal(manager.getStatus()[0].role, "RIGHT / FX");
+  assert.equal(manager.getStatus()[0].pageName, "SAMPLES");
+  assert.deepEqual(
+    { role: roleChanges.at(-1).role, source: roleChanges.at(-1).source },
+    { role: 1, source: "help" },
+  );
+  assert.equal(statuses.at(-1)[0].page, 3);
+  assert.ok(
+    sent.filter(({ message }) => message[6] === 3).length > framesBefore,
+    "Help selection emits refreshed physical LED frames",
+  );
+  assert.equal(manager.selectPage(1, 8, "help"), false);
 });
 
 test("decodes Novation's CC messages for the right-hand button column", () => {
