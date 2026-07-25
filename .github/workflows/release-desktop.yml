@@ -2,6 +2,11 @@ name: Release Desktop
 
 on:
   push:
+    # The main-branch trigger is temporary: it lets the repository-owned
+    # GITHUB_TOKEN publish the already-built v0.2.0 draft. It is removed after
+    # that one recovery run; future releases publish from their tag run.
+    branches:
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
@@ -18,6 +23,7 @@ permissions:
 jobs:
   build-desktop:
     name: Build (${{ matrix.platform }})
+    if: startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
     strategy:
@@ -88,3 +94,38 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+  publish-release:
+    name: Publish release
+    needs: build-desktop
+    if: >-
+      always() &&
+      (
+        (startsWith(github.ref, 'refs/tags/') && needs.build-desktop.result == 'success') ||
+        (github.ref == 'refs/heads/main' && github.event.head_commit.message == 'chore(release): publish v0.2.0')
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.2.0' }}
+    steps:
+      - name: Checkout release notes
+        uses: actions/checkout@v4
+
+      - name: Publish completed draft
+        shell: bash
+        run: |
+          notes_file="docs/releases/${RELEASE_TAG}.md"
+          args=(
+            "$RELEASE_TAG"
+            --repo "$GITHUB_REPOSITORY"
+            --title "Dubnator $RELEASE_TAG"
+            --draft=false
+            --latest
+          )
+          if [[ -f "$notes_file" ]]; then
+            args+=(--notes-file "$notes_file")
+          fi
+          gh release edit "${args[@]}"
