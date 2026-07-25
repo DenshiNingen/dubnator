@@ -2,19 +2,19 @@ name: Release Desktop
 
 on:
   push:
-    # The main-branch trigger is temporary: it lets the repository-owned
-    # GITHUB_TOKEN publish the already-built v0.2.0 draft. It is removed after
-    # that one recovery run; future releases publish from their tag run.
-    branches:
-      - main
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing vX.Y.Z tag to rebuild and publish
+        required: true
+        type: string
 
 # Only one release build per tag/ref at a time; don't cancel in-flight
 # release builds since they may already be uploading artifacts.
 concurrency:
-  group: release-desktop-${{ github.ref }}
+  group: release-desktop-${{ inputs.tag || github.ref }}
   cancel-in-progress: false
 
 permissions:
@@ -23,7 +23,7 @@ permissions:
 jobs:
   build-desktop:
     name: Build (${{ matrix.platform }})
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
     strategy:
@@ -42,6 +42,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -89,8 +91,8 @@ jobs:
           # tauri-action runs the tauri.conf.json beforeBuildCommand (pnpm build)
           # to build the frontend (apps/studio/dist) before bundling.
           projectPath: apps/studio
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Dubnator ${{ github.ref_name }}'
+          tagName: ${{ inputs.tag || github.ref_name }}
+          releaseName: 'Dubnator ${{ inputs.tag || github.ref_name }}'
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
@@ -98,21 +100,18 @@ jobs:
   publish-release:
     name: Publish release
     needs: build-desktop
-    if: >-
-      always() &&
-      (
-        (startsWith(github.ref, 'refs/tags/') && needs.build-desktop.result == 'success') ||
-        (github.ref == 'refs/heads/main' && github.event.head_commit.message == 'chore(release): publish v0.2.0')
-      )
+    if: needs.build-desktop.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.2.0' }}
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - name: Checkout release notes
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Publish completed draft
         shell: bash
