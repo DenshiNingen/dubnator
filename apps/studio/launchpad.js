@@ -62,6 +62,40 @@
     top: "green",
   };
 
+  // The two FX pages use compact, related palettes instead of a single colour
+  // per page. Echo stays warm (orange/red/yellow) with cyan filtering, while
+  // reverb stays cool (violet/blue/cyan) with magenta modulation.
+  const FX_CONTROL_TONES = {
+    "echo.send": "orange",
+    "echo.sat": "red",
+    "echo.fb": "yellow",
+    "echo.dw": "orange",
+    "echo.slide": "yellow",
+    "echo.wow": "magenta",
+    "echo.time": "yellow",
+    "echo.filterfreq": "cyan",
+    "echo.filterq": "cyan",
+    "echo.div": "yellow",
+    "echo.type1": "orange",
+    "echo.type2": "orange",
+    "echo.tap": "yellow",
+    "echo.sync": "lime",
+    "echo.hp": "cyan",
+    "echo.robotic": "magenta",
+    "echo.panic": "red",
+    "reverb.send": "violet",
+    "reverb.ret": "violet",
+    "reverb.room": "blue",
+    "reverb.dw": "violet",
+    "reverb.hfd": "cyan",
+    "reverb.mod": "magenta",
+    "reverb.predelay": "blue",
+    "reverb.bpfreq": "cyan",
+    "reverb.bpq": "cyan",
+    "reverb.bp": "cyan",
+    "reverb.freeze": "magenta",
+  };
+
   const METER_CONTROL_IDS = [
     "deckA.gain", "deckB.gain",
     "in1.gain", "in2.gain", "aux.gain",
@@ -92,6 +126,7 @@
     if (killBand) return BAND_TONES[killBand[1]];
     const geqBand = id.match(/^geqA\.(\d+)$/);
     if (geqBand) return SLOT_TONES[Math.min(9, Number(geqBand[1]))];
+    if (FX_CONTROL_TONES[id]) return FX_CONTROL_TONES[id];
 
     // Controls whose function is more useful than their source identity.
     if (/\.mute$|\.stop$|\.panic$|\.clear$|route\.off$/.test(id)) return "red";
@@ -107,9 +142,6 @@
     if (/\.pan$|xfade|recorder\.format$/.test(id)) return "yellow";
     if (/limiter\..*\.on$|limiter\.master\.on$/.test(id)) return "green";
     if (/^samples\.hold$/.test(id)) return "yellow";
-    if (/^echo\.sync$|^echo\.hp$/.test(id)) return "cyan";
-    if (/^echo\.robotic$/.test(id)) return "magenta";
-    if (/^reverb\.freeze$/.test(id)) return "blue";
     if (/^dubfilter\.hp$/.test(id)) return "cyan";
     if (/^dubfilter\.lp$/.test(id)) return "blue";
     if (/^dubfilter\.route\.music$/.test(id)) return "green";

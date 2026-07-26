@@ -1,13 +1,13 @@
-// Viewport fitting for the fixed-width rack. Kept outside the HTML so the
-// desktop shell can enforce a script-src 'self' content-security policy.
+// Keep the rack unscaled now that its tablet/mobile layouts are responsive.
+// Clearing legacy inline values also protects existing installed PWA sessions
+// that may have run an older fixed-width version of this bootstrap script.
 (function () {
   function fitChassis() {
     const chassis = document.querySelector(".chassis");
     if (!chassis) return;
-    const scale = Math.min(window.innerWidth / chassis.offsetWidth, 1);
     chassis.style.transformOrigin = "top center";
-    chassis.style.transform = `scale(${scale})`;
-    chassis.style.marginBottom = `${chassis.offsetHeight * (scale - 1)}px`;
+    chassis.style.transform = "none";
+    chassis.style.marginBottom = "0";
     document.body.style.height = "";
   }
 

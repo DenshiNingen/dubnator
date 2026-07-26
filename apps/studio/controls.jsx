@@ -27,7 +27,7 @@ function useMidiLearn(midiId) {
 }
 
 // ============ KNOB ============
-function Knob({ value, min = 0, max = 1, onChange, label, format, size = "md", midiId }) {
+function Knob({ value, min = 0, max = 1, onChange, label, format, size = "md", midiId, tone = "" }) {
   const ref = useRef(null);
   const drag = useRef(null);
   const { learning, tryLearn, mappable } = useMidiLearn(midiId);
@@ -56,7 +56,7 @@ function Knob({ value, min = 0, max = 1, onChange, label, format, size = "md", m
   const angle = -135 + pct * 270; // -135 to 135 deg
 
   return (
-    <div className="knob-wrap">
+    <div className={`knob-wrap${tone ? ` control-tone-${tone}` : ""}`}>
       <div
         ref={ref}
         className={`knob ${size === "sm" ? "sm" : size === "lg" ? "lg" : ""} ${learning ? "midi-learning" : ""}`}

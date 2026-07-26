@@ -132,6 +132,37 @@ test("LED colours communicate function and distinguish bank slots", () => {
   }
 });
 
+test("echo and reverb LED palettes are varied but visually related", () => {
+  const tones = {
+    "echo.send": "orange",
+    "echo.sat": "red",
+    "echo.fb": "yellow",
+    "echo.dw": "orange",
+    "echo.slide": "yellow",
+    "echo.wow": "magenta",
+    "echo.time": "yellow",
+    "echo.filterfreq": "cyan",
+    "echo.tap": "yellow",
+    "echo.sync": "lime",
+    "echo.hp": "cyan",
+    "echo.robotic": "magenta",
+    "echo.panic": "red",
+    "reverb.send": "violet",
+    "reverb.ret": "violet",
+    "reverb.room": "blue",
+    "reverb.dw": "violet",
+    "reverb.hfd": "cyan",
+    "reverb.mod": "magenta",
+    "reverb.predelay": "blue",
+    "reverb.bpfreq": "cyan",
+    "reverb.freeze": "magenta",
+    "reverb.bp": "cyan",
+  };
+  for (const [id, tone] of Object.entries(tones)) {
+    assert.equal(controlTone(id), tone, `${id} uses ${tone}`);
+  }
+});
+
 test("isolator VU faders use the same band colours as the UI", () => {
   const manager = new LaunchpadMiniMk3Manager({ catalog, now: () => 0 });
   const tones = {

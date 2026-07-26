@@ -1991,7 +1991,7 @@ function App() {
   // The big screen — shown in the shared region when SETUP/AUDIO is selected
   // (spans the two EQ grid columns). PANEL shows the EQ panels instead.
   const displayPanel = (
-    <div className="panel with-screws display-panel" style={{ gridColumn: "span 2" }}>
+    <div className="panel with-screws display-panel rack-display" style={{ gridColumn: "span 2" }}>
       <div className="screw-bl"></div><div className="screw-br"></div>
       <div className="panel-header">
         <span className="panel-title">Display</span>
@@ -2090,7 +2090,7 @@ function App() {
       {/* ============ TOP ROW ============ */}
       <div className="grid-top">
         {/* MUSIC INPUTS */}
-        <div className="panel with-screws" style={{ position: "relative" }}>
+        <div className="panel with-screws rack-music" style={{ position: "relative" }}>
           <div className="screw-bl"></div><div className="screw-br"></div>
           <div className="panel-body" style={{ paddingTop: 6 }}>
             <div className="col" style={{ gap: 0 }}>
@@ -2173,7 +2173,7 @@ function App() {
         </div>
 
         {/* MIC / AUX */}
-        <div className="panel with-screws">
+        <div className="panel with-screws rack-mic">
           <div className="screw-bl"></div><div className="screw-br"></div>
           <div className="panel-body" style={{ paddingTop: 6 }}>
             <div className="col" style={{ gap: 0 }}>
@@ -2224,7 +2224,7 @@ function App() {
         </div>
 
         {/* SETUP / EQ SELECT / DUBFILTER COLUMN */}
-        <div className="panel with-screws">
+        <div className="panel with-screws rack-setup">
           <div className="screw-bl"></div><div className="screw-br"></div>
           <div className="panel-body" style={{ padding: 8 }}>
             <div className="setup-col">
@@ -2335,7 +2335,7 @@ function App() {
         {/* shared screen region — EQs (PANEL) or the display (SETUP/AUDIO) */}
         {mainView === "panel" ? (<>
         {/* 10 BAND GEQ */}
-        <div className="panel with-screws fill-v">
+        <div className="panel with-screws fill-v rack-geq">
           <div className="screw-bl"></div><div className="screw-br"></div>
           <div className="panel-header">
             <span className="panel-title">10 Band Graphic Equalizer</span>
@@ -2377,7 +2377,7 @@ function App() {
         </div>
 
         {/* 4 BAND PARAMETRIC */}
-        <div className="panel with-screws fill-v">
+        <div className="panel with-screws fill-v rack-parametric">
           <div className="screw-bl"></div><div className="screw-br"></div>
           <div className="panel-header">
             <span className="panel-title">4 Band Parametric</span>
@@ -2388,7 +2388,7 @@ function App() {
             </div>
           </div>
           <div className="panel-body">
-            <div style={{ display: "grid", gridTemplateColumns: "auto repeat(4, 1fr)", gap: "34px 8px", alignItems: "center" }}>
+            <div className="parametric-controls" style={{ display: "grid", gridTemplateColumns: "auto repeat(4, 1fr)", gap: "34px 8px", alignItems: "center" }}>
               <div className="mono" style={{ fontSize: 9, color: "var(--text-dim)", textAlign: "right" }}>FREQ</div>
               {paramA.map((p, i) => (
                 <div key={`f${i}`} className="center">
@@ -2479,7 +2479,7 @@ function App() {
       {/* ============ MID ROW ============ */}
       <div className="grid-mid">
         {/* DUB SIREN — compact */}
-        <div className="panel with-screws">
+        <div className="panel with-screws rack-siren">
           <div className="screw-bl"></div><div className="screw-br"></div>
           <div className="panel-header">
             <span className="panel-title">Dub Siren</span>
@@ -2769,37 +2769,37 @@ function App() {
         )}
 
         {/* REVERB */}
-        <div className="panel with-screws fill-v">
+        <div className="panel with-screws fill-v rack-reverb">
           <div className="screw-bl"></div><div className="screw-br"></div>
           <div className="panel-header">
             <span className="panel-title">Reverb Processor</span>
             <div className="row gap-3 aic">
-              <button className={`btn-xs btn ${reverb.freeze ? "active" : ""}`}
+              <button className={`btn-xs btn fx-action fx-freeze ${reverb.freeze ? "active" : ""}`}
                 onClick={() => setReverb((s) => ({ ...s, freeze: !s.freeze }))}
                 title="Freeze — near-infinite reverb tail for drones/sweeps">
                 FREEZE{reverb.freeze ? " ●" : ""}
               </button>
-              <button className={`btn-xs btn ${!reverb.bpBypass ? "active" : ""}`}
+              <button className={`btn-xs btn fx-action fx-filter ${!reverb.bpBypass ? "active" : ""}`}
                 onClick={() => setReverb((s) => ({ ...s, bpBypass: !s.bpBypass }))}
                 title="Band-pass filter on the reverb tail (off = FX direct, skip the BP)">
                 {reverb.bpBypass ? "BP OFF" : "BP ON"}
               </button>
-              <span className="panel-sub">TYPE 2</span>
+              <span className="panel-sub fx-status">TYPE 2</span>
             </div>
           </div>
           <div className="panel-body">
-            <div className="row gap-4">
+            <div className="row gap-4 fx-control-layout">
               <div className="dial-bank" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
                 {[
-                  { k: "send", label: "SEND", min: 0, max: 1, fmt: (v) => (v * 100).toFixed(0) + "%" },
-                  { k: "ret", label: "RTN", min: 0, max: 1.5, fmt: (v) => (v * 100).toFixed(0) + "%" },
-                  { k: "hfd", label: "HFD", min: 0, max: 1, fmt: (v) => (v * 100).toFixed(0) + "%" },
-                  { k: "room", label: "ROOM", min: 0, max: 1, fmt: (v) => (v * 100).toFixed(0) + "%" },
-                  { k: "dw", label: "D/W", min: 0, max: 1, fmt: (v) => (v * 100).toFixed(0) + "%" },
-                  { k: "preDelay", label: "PRE", min: 0, max: 200, fmt: (v) => v.toFixed(0) + "ms" },
-                  { k: "mod", label: "MOD", min: 0, max: 1, fmt: (v) => (v * 100).toFixed(0) + "%" },
+                  { k: "send", label: "SEND", tone: "violet", min: 0, max: 1, fmt: (v) => (v * 100).toFixed(0) + "%" },
+                  { k: "ret", label: "RTN", tone: "violet", min: 0, max: 1.5, fmt: (v) => (v * 100).toFixed(0) + "%" },
+                  { k: "hfd", label: "HFD", tone: "cyan", min: 0, max: 1, fmt: (v) => (v * 100).toFixed(0) + "%" },
+                  { k: "room", label: "ROOM", tone: "blue", min: 0, max: 1, fmt: (v) => (v * 100).toFixed(0) + "%" },
+                  { k: "dw", label: "D/W", tone: "violet", min: 0, max: 1, fmt: (v) => (v * 100).toFixed(0) + "%" },
+                  { k: "preDelay", label: "PRE", tone: "blue", min: 0, max: 200, fmt: (v) => v.toFixed(0) + "ms" },
+                  { k: "mod", label: "MOD", tone: "magenta", min: 0, max: 1, fmt: (v) => (v * 100).toFixed(0) + "%" },
                 ].map((d) => (
-                  <Knob key={d.k} size="md" label={d.label} midiId={`reverb.${d.k.toLowerCase()}`}
+                  <Knob key={d.k} size="md" label={d.label} tone={d.tone} midiId={`reverb.${d.k.toLowerCase()}`}
                     value={reverb[d.k]} min={d.min} max={d.max}
                     onChange={(v) => setReverb((s) => ({ ...s, [d.k]: v }))}
                     format={d.fmt} />
@@ -2813,14 +2813,14 @@ function App() {
                     type="bandpass"
                     freq={reverb.bpFreq} q={reverb.bpQ}
                     minFreq={80} maxFreq={18000}
-                    color="rgba(255,255,255,0.85)"
-                    fillColor="rgba(255,255,255,0.08)"
+                    color="#a879ff"
+                    fillColor="rgba(168,121,255,0.13)"
                     onChange={({ freq, q }) => setReverb((s) => ({ ...s, bpFreq: Math.round(freq), bpQ: +q.toFixed(2), bpBypass: false }))}
                   />
                 </div>
                 <div className="row between" style={{ marginTop: 4 }}>
                   <span className="mono" style={{ fontSize: 9, color: "var(--text-dim)" }}>{reverb.bpFreq.toFixed(0)}Hz</span>
-                  <span className="mono" style={{ fontSize: 9, color: "var(--accent)" }}>{reverb.bpQ.toFixed(2)}Q</span>
+                  <span className="mono fx-filter-q" style={{ fontSize: 9 }}>{reverb.bpQ.toFixed(2)}Q</span>
                   <span className="mono" style={{ fontSize: 9, color: "var(--text-dim)" }}>{reverb.bpBypass ? "BP BYPASSED" : "drag ↔ freq · ↕ Q"}</span>
                 </div>
               </div>
@@ -2829,21 +2829,21 @@ function App() {
         </div>
 
         {/* TAPE ECHO */}
-        <div className="panel with-screws fill-v">
+        <div className="panel with-screws fill-v rack-echo">
           <div className="screw-bl"></div><div className="screw-br"></div>
           <div className="panel-header">
             <span className="panel-title">Tape Echo</span>
             <div className="row gap-3 aic">
-              <button className={`btn-xs btn ${echo.type === 1 ? "active" : ""}`}
+              <button className={`btn-xs btn fx-action fx-type ${echo.type === 1 ? "active" : ""}`}
                 onClick={() => setEcho(s => ({ ...s, type: 1 }))}>T1</button>
-              <button className={`btn-xs btn ${echo.type === 2 ? "active" : ""}`}
+              <button className={`btn-xs btn fx-action fx-type ${echo.type === 2 ? "active" : ""}`}
                 onClick={() => setEcho(s => ({ ...s, type: 2 }))}>T2</button>
-              <button className="btn-xs btn" onClick={tapTempo}>TAP</button>
-              <button className={`btn-xs btn ${echo.sync ? "active" : ""}`}
+              <button className="btn-xs btn fx-action fx-timing" onClick={tapTempo}>TAP</button>
+              <button className={`btn-xs btn fx-action fx-sync ${echo.sync ? "active" : ""}`}
                 onClick={() => setEcho(s => ({ ...s, sync: !s.sync }))}
                 title="Tempo-sync the echo to a musical division of the tapped BPM">SYNC</button>
               {echo.sync && (
-                <select className="mono" style={{ fontSize: 9, background: "#111", color: "var(--accent)", border: "1px solid #333", borderRadius: 3 }}
+                <select className="mono echo-sync-select"
                   value={echo.syncDiv} onChange={(e) => setEcho(s => ({ ...s, syncDiv: e.target.value }))}
                   title="Echo time as a fraction of the beat">
                   {ECHO_DIVS.map(d => (
@@ -2851,33 +2851,32 @@ function App() {
                   ))}
                 </select>
               )}
-              <button className={`btn-xs btn ${echo.hpOn ? "active" : ""}`}
+              <button className={`btn-xs btn fx-action fx-filter ${echo.hpOn ? "active" : ""}`}
                 onClick={() => setEcho(s => ({ ...s, hpOn: !s.hpOn }))}
                 title="Sub high-pass on the echo loop — keeps low end out of the repeats">
                 SUB-HP</button>
-              <button className={`btn-xs btn ${echo.robotic ? "active" : ""}`}
+              <button className={`btn-xs btn fx-action fx-robot ${echo.robotic ? "active" : ""}`}
                 onClick={() => setEcho(s => ({ ...s, robotic: !s.robotic }))}
                 title="Full-speed echo: snaps the delay ultra-short for a metallic/robotic comb ring">
                 ROBOT</button>
-              <button className="btn-xs btn"
-                style={{ background: "#3a0000", color: "#ff5252", borderColor: "#5a1010" }}
+              <button className="btn-xs btn fx-action fx-panic"
                 onClick={() => eng.panicFX && eng.panicFX()}>PANIC</button>
-              <span className="panel-sub">{echo.robotic ? "ROBOTIC" : echo.sync ? `TEMPO ${echo.bpm} BPM · ${echo.syncDiv}` : `DELAY ${echo.time.toFixed(0)} MS · TEMPO ${(60000 / Math.max(1, echo.time)).toFixed(0)} BPM`}</span>
+              <span className="panel-sub fx-status">{echo.robotic ? "ROBOTIC" : echo.sync ? `TEMPO ${echo.bpm} BPM · ${echo.syncDiv}` : `DELAY ${echo.time.toFixed(0)} MS · TEMPO ${(60000 / Math.max(1, echo.time)).toFixed(0)} BPM`}</span>
             </div>
           </div>
           <div className="panel-body">
-            <div className="row gap-4">
+            <div className="row gap-4 fx-control-layout">
               <div className="dial-bank" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
                 {[
-                  { k: "send", label: "SEND", min: 0, max: 1, fmt: (v) => (v * 100).toFixed(0) + "%" },
-                  { k: "sat", label: "SAT", min: 0, max: 1, fmt: (v) => (v * 100).toFixed(0) + "%" },
-                  { k: "fb", label: "F.B.", min: 0, max: 0.95, fmt: (v) => (v * 100).toFixed(0) + "%" },
-                  { k: "dw", label: "D/W", min: 0, max: 1, fmt: (v) => (v * 100).toFixed(0) + "%" },
-                  { k: "slide", label: "SLIDE", min: 0, max: 1, fmt: (v) => (v * 100).toFixed(0) + "%" },
-                  { k: "wow", label: "WOW", min: 0, max: 1, fmt: (v) => (v * 100).toFixed(0) + "%" },
-                  { k: "time", label: "TIME", min: 30, max: 1500, fmt: fmtMs },
+                  { k: "send", label: "SEND", tone: "orange", min: 0, max: 1, fmt: (v) => (v * 100).toFixed(0) + "%" },
+                  { k: "sat", label: "SAT", tone: "red", min: 0, max: 1, fmt: (v) => (v * 100).toFixed(0) + "%" },
+                  { k: "fb", label: "F.B.", tone: "yellow", min: 0, max: 0.95, fmt: (v) => (v * 100).toFixed(0) + "%" },
+                  { k: "dw", label: "D/W", tone: "orange", min: 0, max: 1, fmt: (v) => (v * 100).toFixed(0) + "%" },
+                  { k: "slide", label: "SLIDE", tone: "yellow", min: 0, max: 1, fmt: (v) => (v * 100).toFixed(0) + "%" },
+                  { k: "wow", label: "WOW", tone: "magenta", min: 0, max: 1, fmt: (v) => (v * 100).toFixed(0) + "%" },
+                  { k: "time", label: "TIME", tone: "yellow", min: 30, max: 1500, fmt: fmtMs },
                 ].map((d) => (
-                  <Knob key={d.k} size="md" label={d.label} midiId={`echo.${d.k}`}
+                  <Knob key={d.k} size="md" label={d.label} tone={d.tone} midiId={`echo.${d.k}`}
                     value={echo[d.k]} min={d.min} max={d.max}
                     onChange={(v) => setEcho((s) => ({ ...s, [d.k]: v }))}
                     format={d.fmt} />
@@ -2891,14 +2890,14 @@ function App() {
                     type={echo.type === 2 ? "highpass" : "lowpass"}
                     freq={echo.filter} q={echo.filterQ}
                     minFreq={120} maxFreq={20000}
-                    color="rgba(255,255,255,0.85)"
-                    fillColor="rgba(255,255,255,0.08)"
+                    color="#ff9f43"
+                    fillColor="rgba(255,159,67,0.13)"
                     onChange={({ freq, q }) => setEcho((s) => ({ ...s, filter: Math.round(freq), filterQ: +q.toFixed(2) }))}
                   />
                 </div>
                 <div className="row between" style={{ marginTop: 4 }}>
                   <span className="mono" style={{ fontSize: 9, color: "var(--text-dim)" }}>{echo.filter.toFixed(0)}Hz</span>
-                  <span className="mono" style={{ fontSize: 9, color: "var(--accent)" }}>{echo.filterQ.toFixed(2)}Q</span>
+                  <span className="mono fx-filter-q" style={{ fontSize: 9 }}>{echo.filterQ.toFixed(2)}Q</span>
                   <span className="mono" style={{ fontSize: 9, color: "var(--text-dim)" }}>drag ↔ freq · ↕ Q</span>
                 </div>
               </div>
@@ -2907,7 +2906,7 @@ function App() {
         </div>
 
         {/* SAMPLES MINI */}
-        <div className="panel with-screws">
+        <div className="panel with-screws rack-sample-fx">
           <div className="screw-bl"></div><div className="screw-br"></div>
           <div className="panel-header">
             <span className="panel-title" style={{ fontSize: 10 }}>Samples</span>
@@ -2955,7 +2954,7 @@ function App() {
         </div>
 
         {/* MASTER */}
-        <div className="panel with-screws">
+        <div className="panel with-screws rack-master">
           <div className="screw-bl"></div><div className="screw-br"></div>
           <div className="panel-header">
             <span className="panel-title" style={{ fontSize: 10 }}>Master</span>
@@ -3028,7 +3027,7 @@ function App() {
           { key: "high", label: "HIGH", color: "rgba(56,189,248,0.18)", lineColor: "#38bdf8", freqLabels: ["2kHz", "5kHz"] },
           { key: "top", label: "TOP", color: "rgba(34,197,94,0.18)", lineColor: "#22c55e", freqLabels: ["5kHz", "20kHz"] },
         ].map((k) => (
-          <div key={k.key} className="panel with-screws">
+          <div key={k.key} className="panel with-screws rack-kill">
             <div className="screw-bl"></div><div className="screw-br"></div>
             <div className="panel-header">
               <span className="panel-title">{k.label}</span>
@@ -3093,7 +3092,7 @@ function App() {
 
         {/* ============ RIGHT RAIL ============ */}
         <div className="right-rail">
-          <div className="panel with-screws">
+          <div className="panel with-screws rack-sample-triggers">
             <div className="screw-bl"></div><div className="screw-br"></div>
             <div className="panel-header">
               <span className="panel-title">Sample Triggers</span>
@@ -3182,7 +3181,7 @@ function App() {
             </div>
           </div>
 
-          <div className="panel with-screws">
+          <div className="panel with-screws rack-limiters">
             <div className="screw-bl"></div><div className="screw-br"></div>
             <div className="panel-header">
               <span className="panel-title">Limiters</span>
@@ -3227,7 +3226,7 @@ function App() {
             </div>
           </div>
 
-          <div className="panel with-screws">
+          <div className="panel with-screws rack-recorder">
             <div className="screw-bl"></div><div className="screw-br"></div>
             <div className="panel-header">
               <span className="panel-title">Recorder</span>
@@ -3254,7 +3253,7 @@ function App() {
       </div>{/* /grid-app */}
 
       {/* footer */}
-      <div className="row between" style={{ marginTop: 14, padding: "0 8px", fontSize: 9, letterSpacing: "0.25em", textTransform: "uppercase", color: "var(--text-faint)" }}>
+      <div className="row between rack-footer" style={{ marginTop: 14, padding: "0 8px", fontSize: 9, letterSpacing: "0.25em", textTransform: "uppercase", color: "var(--text-faint)" }}>
         <span>DUBNATOR MK-1 · ORIGINAL DESIGN {advanced ? "· ADV" : "· NORMAL"}</span>
         <span>SHORTCUTS: ? = ALL KEYS · ZXCVB = KILLS · G/H = PLAY · 1 = SIREN · 9 = TAP · −/+ = DUB FILTER</span>
         <span>© 2026</span>

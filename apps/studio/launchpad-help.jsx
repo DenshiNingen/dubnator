@@ -381,12 +381,14 @@ function LaunchpadLayoutHelp({ catalog, devices = [], onSelectPage, onSelectRole
       </div>
 
       <div className="lp-help-colour-key mono">
-        <span className="lp-tone-red">RED · STOP / SUB</span>
+        <span className="lp-tone-red">RED · STOP / DRIVE / SUB</span>
         <span className="lp-tone-orange">ORANGE · ECHO / LOW</span>
-        <span className="lp-tone-yellow">YELLOW · CUE / MID</span>
+        <span className="lp-tone-yellow">YELLOW · TIME / FEEDBACK / MID</span>
         <span className="lp-tone-cyan">CYAN · FILTER / HIGH</span>
         <span className="lp-tone-green">GREEN · PLAY / TOP</span>
-        <span className="lp-tone-violet">VIOLET · REVERB</span>
+        <span className="lp-tone-blue">BLUE · SPACE / DECK B</span>
+        <span className="lp-tone-violet">VIOLET · REVERB / MIX</span>
+        <span className="lp-tone-magenta">MAGENTA · MOD / ROBOT</span>
         <span className="lp-vu-gradient">VU · LIVE LEVEL</span>
         <span className="lp-bank-rainbow">RAINBOW · BANK SLOTS</span>
       </div>
