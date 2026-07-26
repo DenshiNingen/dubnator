@@ -3,6 +3,26 @@ const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
 const FREQS_10 = [32, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 const ECHO_DIVS = ["1/4", "1/4.", "1/4t", "1/8", "1/8.", "1/8t", "1/16", "1/16t"];
+// A restrained performance starting point: tempo-related repeats, less low-end
+// build-up and a dark enough loop to sit behind the source instead of masking it.
+const DUB_ECHO_START = Object.freeze({
+  send: 0.32,
+  time: 375,
+  fb: 0.48,
+  sat: 0.28,
+  slide: 0.14,
+  dw: 0.38,
+  filter: 3200,
+  filterQ: 0.7,
+  hp: 150,
+  hpOn: true,
+  direct: false,
+  type: 1,
+  wow: 0.08,
+  robotic: false,
+  sync: true,
+  syncDiv: "1/8.",
+});
 // Quick 10-band graphic-EQ preset shapes (dB per band, all within the ±12 slider
 // range). Applied to Deck A's GEQ; copy to B with the →B button.
 const EQ_SHAPES = {
@@ -311,6 +331,8 @@ function App() {
   // === echo ===
   const [echo, setEcho] = useState({ send: 0.3, time: 290, fb: 0.35, sat: 0.4, slide: 0.5, dw: 0.5, filter: 2760, filterQ: 1.0, hp: 150, hpOn: false, direct: false, type: 1, wow: 0, robotic: false, sync: false, syncDiv: "1/8", bpm: 120 });
   const tapTrackerRef = useRef(new TapTempoTracker());
+  const [echoThrowHeld, setEchoThrowHeld] = useState(false);
+  const echoThrowRestoreRef = useRef(null);
 
   // === dub filter ===
   const [dubFilter, setDubFilter] = useState({ mode: "lp", cutoff: 1000, q: 1.0, route: "music", on: false, sweep: 0, sweepRate: 0.5 });
@@ -743,6 +765,37 @@ function App() {
     setEcho(s => ({ ...s, time: ms, bpm }));
   };
 
+  const applyDubEchoPreset = () => {
+    // Keep the performer's tapped tempo; only the musical division and sound
+    // of the repeats are part of this quick starting point.
+    setEcho(s => ({ ...s, ...DUB_ECHO_START, bpm: s.bpm }));
+  };
+
+  const echoThrowDown = () => {
+    if (echoThrowRestoreRef.current) return;
+    echoThrowRestoreRef.current = {
+      musicEcho: musicSends.echo,
+      direct: echo.direct,
+    };
+    setEchoThrowHeld(true);
+    setMusicSends(s => ({ ...s, echo: true }));
+    if (echo.direct) setEcho(s => ({ ...s, direct: false }));
+  };
+
+  const echoThrowUp = () => {
+    const previous = echoThrowRestoreRef.current;
+    if (!previous) return;
+    echoThrowRestoreRef.current = null;
+    setEchoThrowHeld(false);
+    setMusicSends(s => ({ ...s, echo: previous.musicEcho }));
+    setEcho(s => ({ ...s, direct: previous.direct }));
+  };
+
+  const setEchoThrow = (pressed) => {
+    if (pressed) echoThrowDown();
+    else echoThrowUp();
+  };
+
   // === Global presets — capture/restore the full console state ===
   const PRESET_KEY = "dubnator.preset.autoload.v1";
   const buildPreset = () => ({
@@ -1031,6 +1084,8 @@ function App() {
       "echo.type1": (v) => { if (v > 0.5) setEcho((s) => ({ ...s, type: 1 })); },
       "echo.type2": (v) => { if (v > 0.5) setEcho((s) => ({ ...s, type: 2 })); },
       "echo.tap": (v) => { if (v > 0.5) actionsRef.current.tapTempo?.(); },
+      "echo.dub": (v) => { if (v > 0.5) actionsRef.current.echoDub?.(); },
+      "echo.throw": (v) => actionsRef.current.echoThrow?.(v > 0.5),
       "echo.div": (v) => setEcho((s) => ({ ...s, syncDiv: ["1/4", "1/4.", "1/4t", "1/8", "1/8.", "1/8t", "1/16", "1/16t"][Math.min(7, Math.round(v * 7))] })),
       "echo.hp": (v) => setEcho((s) => ({ ...s, hpOn: v > 0.5 })),
       "echo.panic": (v) => { if (v > 0.5 && eng.panicFX) eng.panicFX(); },
@@ -1305,7 +1360,7 @@ function App() {
       "flat.gain": clamp((flatGain + 24) / 36),
       "reverb.bp": reverb.bpBypass ? 0 : 1,
       "echo.type1": echo.type === 1 ? 1 : 0, "echo.type2": echo.type === 2 ? 1 : 0,
-      "echo.tap": 0,
+      "echo.tap": 0, "echo.dub": 0, "echo.throw": echoThrowHeld ? 1 : 0,
       "echo.div": clamp((echo.syncDiv === "1/4" ? 0 : echo.syncDiv === "1/4." ? 1 : echo.syncDiv === "1/4t" ? 2 : echo.syncDiv === "1/8" ? 3 : echo.syncDiv === "1/8." ? 4 : echo.syncDiv === "1/8t" ? 5 : echo.syncDiv === "1/16" ? 6 : 7) / 7),
       "echo.hp": echo.hpOn ? 1 : 0, "echo.panic": 0,
       "dubfilter.hp": dubFilter.on && dubFilter.mode === "hp" ? 1 : 0,
@@ -1908,6 +1963,8 @@ function App() {
   actionsRef.current = {
     deckLoop: deckLoopFromSurface,
     tapTempo,
+    echoDub: applyDubEchoPreset,
+    echoThrow: setEchoThrow,
     toggleRecord,
     toggleMic,
     toggleLine,
@@ -1928,7 +1985,7 @@ function App() {
     crossfadeCurve, kills, killTrims, killFreqs, killQ, flatGain, musicSends,
     auxSends, auxLevels, pureSub, deckA, deckB, inputs, geqA, paramA, revLim,
     echoLim, selectedSample, flashIdx, recording, recFormat, advanced,
-    autoAdvance, rewindStop, micOn, lineOn, multiOn,
+    autoAdvance, rewindStop, micOn, lineOn, multiOn, echoThrowHeld,
   ]);
 
   // Hardware VU feedback is quantized to the Launchpad's eight rows and capped
@@ -2838,6 +2895,23 @@ function App() {
                 onClick={() => setEcho(s => ({ ...s, type: 1 }))}>T1</button>
               <button className={`btn-xs btn fx-action fx-type ${echo.type === 2 ? "active" : ""}`}
                 onClick={() => setEcho(s => ({ ...s, type: 2 }))}>T2</button>
+              <button className="btn-xs btn fx-action fx-dub"
+                onClick={applyDubEchoPreset}
+                title="Load a filtered, tempo-synced dub echo starting point">DUB</button>
+              <button className={`btn-xs btn fx-action fx-throw ${echoThrowHeld ? "active" : ""}`}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  event.currentTarget.setPointerCapture?.(event.pointerId);
+                  echoThrowDown();
+                }}
+                onPointerUp={(event) => {
+                  event.currentTarget.releasePointerCapture?.(event.pointerId);
+                  echoThrowUp();
+                }}
+                onPointerCancel={echoThrowUp}
+                onLostPointerCapture={echoThrowUp}
+                title="Hold to send music into the echo; release leaves the tail ringing">
+                THROW</button>
               <button className="btn-xs btn fx-action fx-timing" onClick={tapTempo}>TAP</button>
               <button className={`btn-xs btn fx-action fx-sync ${echo.sync ? "active" : ""}`}
                 onClick={() => setEcho(s => ({ ...s, sync: !s.sync }))}
@@ -2871,7 +2945,7 @@ function App() {
                   { k: "send", label: "SEND", tone: "orange", min: 0, max: 1, fmt: (v) => (v * 100).toFixed(0) + "%" },
                   { k: "sat", label: "SAT", tone: "red", min: 0, max: 1, fmt: (v) => (v * 100).toFixed(0) + "%" },
                   { k: "fb", label: "F.B.", tone: "yellow", min: 0, max: 0.95, fmt: (v) => (v * 100).toFixed(0) + "%" },
-                  { k: "dw", label: "D/W", tone: "orange", min: 0, max: 1, fmt: (v) => (v * 100).toFixed(0) + "%" },
+                  { k: "dw", label: "RTN", tone: "orange", min: 0, max: 1, fmt: (v) => (v * 100).toFixed(0) + "%" },
                   { k: "slide", label: "SLIDE", tone: "yellow", min: 0, max: 1, fmt: (v) => (v * 100).toFixed(0) + "%" },
                   { k: "wow", label: "WOW", tone: "magenta", min: 0, max: 1, fmt: (v) => (v * 100).toFixed(0) + "%" },
                   { k: "time", label: "TIME", tone: "yellow", min: 30, max: 1500, fmt: fmtMs },

@@ -66,6 +66,8 @@ function launchpadControlDescription(id, control, metered) {
     "xfade.b": "Moves the crossfader immediately to side B.",
     "echo.panic": "Immediately clears the active echo and reverb tails.",
     "echo.tap": "Sets echo tempo manually from repeated taps.",
+    "echo.dub": "Loads a filtered, tempo-synced dub echo starting point.",
+    "echo.throw": "Sends the music mix into echo only while held; release leaves the tail ringing.",
     "recorder.toggle": "Starts or stops master recording.",
     "recorder.format": "Switches the recording format between WAV and AIFF.",
     "system.advanced": "Enables advanced isolator controls and positive gain ranges.",

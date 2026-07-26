@@ -79,6 +79,8 @@
     "echo.type1": "orange",
     "echo.type2": "orange",
     "echo.tap": "yellow",
+    "echo.dub": "orange",
+    "echo.throw": "green",
     "echo.sync": "lime",
     "echo.hp": "cyan",
     "echo.robotic": "magenta",
@@ -268,7 +270,7 @@
       "echo.slide", "echo.wow", "echo.time", "echo.filterfreq",
     ], [
       "echo.type1", "echo.type2", "echo.tap", "echo.sync",
-      "echo.hp", "echo.robotic", "echo.panic", "music.echo",
+      "echo.hp", "echo.robotic", "echo.panic", "echo.throw",
     ]),
     page("REVERB", "reverb", [
       "reverb.send", "reverb.ret", "reverb.room", "reverb.dw",
@@ -284,7 +286,7 @@
       "dubfilter.on", "dubfilter.hp", "dubfilter.lp",
       "dubfilter.route.music", "dubfilter.route.master",
       "dubfilter.route.samples", "dubfilter.route.off",
-      "echo.hp",
+      "echo.dub",
     ]),
     page("SAMPLES", "sampler", [
       "samples.gain", "samples.hp", "samples.rev", "samples.echo", "samples.select",

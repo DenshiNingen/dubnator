@@ -101,7 +101,7 @@ function setup() {
 test("dual layout covers the complete performance catalog", () => {
   const manager = new LaunchpadMiniMk3Manager({ catalog });
   const mapped = new Set(manager.allMappedIds());
-  assert.equal(catalog.length, 200);
+  assert.equal(catalog.length, 202);
   assert.equal(catalog.filter((control) => !mapped.has(control.id)).length, 0);
   assert.equal(manager.pages.length, 2);
   assert.ok(manager.pages.every((role) => role.length === 8));
@@ -143,6 +143,8 @@ test("echo and reverb LED palettes are varied but visually related", () => {
     "echo.time": "yellow",
     "echo.filterfreq": "cyan",
     "echo.tap": "yellow",
+    "echo.dub": "orange",
+    "echo.throw": "green",
     "echo.sync": "lime",
     "echo.hp": "cyan",
     "echo.robotic": "magenta",
@@ -200,8 +202,9 @@ test("echo and reverb keep analogous controls in matching positions", () => {
     assert.equal(echo.ranges[column], echoId);
     assert.equal(reverb.ranges[column], reverbId);
   }
-  assert.equal(echo.sideButtons[7], "music.echo");
+  assert.equal(echo.sideButtons[7], "echo.throw");
   assert.equal(reverb.sideButtons[7], "music.rev");
+  assert.equal(manager.describePage(1, 2).sideButtons[7], "echo.dub");
 });
 
 test("siren uses previous/next navigation and exposes both FX amounts", () => {

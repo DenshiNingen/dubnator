@@ -23,7 +23,7 @@ test("reverb and echo share a functional colour vocabulary", () => {
     ['k: "dw", label: "D/W", tone: "violet"'],
     ['k: "mod", label: "MOD", tone: "magenta"'],
     ['k: "send", label: "SEND", tone: "orange"'],
-    ['k: "dw", label: "D/W", tone: "orange"'],
+    ['k: "dw", label: "RTN", tone: "orange"'],
     ['k: "sat", label: "SAT", tone: "red"'],
     ['k: "fb", label: "F.B.", tone: "yellow"'],
     ['k: "wow", label: "WOW", tone: "magenta"'],
