@@ -11,6 +11,8 @@
     "build": "turbo run build",
     "dev": "turbo run dev",
     "test": "turbo run test",
+    "test:e2e": "pnpm --filter @dubnator/studio test:e2e",
+    "test:e2e:headed": "pnpm --filter @dubnator/studio test:e2e:headed",
     "lint": "turbo run lint",
     "studio": "pnpm --filter @dubnator/studio dev",
     "web": "pnpm --filter @dubnator/web dev"

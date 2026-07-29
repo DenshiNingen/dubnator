@@ -55,6 +55,8 @@ Per-app:
 pnpm --filter @dubnator/studio dev      # app dev server (watch + live reload)
 pnpm --filter @dubnator/studio build
 pnpm --filter @dubnator/studio test     # engine / recorder / MIDI / PWA tests
+pnpm test:e2e                           # Chromium: desktop + tablet + mobile
+pnpm test:e2e:headed                    # same checks in a visible test browser
 pnpm --filter @dubnator/studio tauri:build   # build the desktop app locally (needs Rust)
 ```
 
@@ -62,6 +64,12 @@ pnpm --filter @dubnator/studio tauri:build   # build the desktop app locally (ne
 mapping, validates the generated PWA shell, and smoke-tests the statically
 rendered marketing site. CI additionally runs `cargo fmt --check` and
 `cargo check --locked` for the native shell.
+
+Browser tests use an isolated Playwright profile and start Studio automatically
+when it is not already running on `127.0.0.1:1420`. Attached screenshots and the
+HTML report are written to `apps/studio/playwright-report/`; traces, screenshots
+and video from failed runs are written under `apps/studio/test-results/`.
+Neither directory is committed.
 
 ## The rack
 

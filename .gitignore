@@ -11,6 +11,8 @@ out/
 .DS_Store
 .vercel/
 *.tsbuildinfo
+playwright-report/
+test-results/
 
 # Tauri build artifacts
 apps/studio/src-tauri/target/

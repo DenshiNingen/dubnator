@@ -8,17 +8,21 @@
     "build": "node build.mjs",
     "dev": "node build.mjs --serve",
     "test": "node --test tests/build.test.mjs tests/deck-end-mode.test.mjs tests/deck-load-lock.test.mjs tests/echo-performance.test.mjs tests/fx-colours.test.mjs tests/keyboard.test.mjs tests/launchpad.test.mjs tests/responsive.test.mjs tests/tap-tempo.test.mjs && node tests/engine.test.mjs && node tests/recorder.test.mjs && node tests/midi.test.mjs",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:ui": "playwright test --ui",
     "lint": "eslint .",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
   },
   "dependencies": {
+    "jszip": "3.10.1",
     "react": "18.3.1",
-    "react-dom": "18.3.1",
-    "jszip": "3.10.1"
+    "react-dom": "18.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "1.58.2",
     "@tauri-apps/cli": "^2.1.0",
     "esbuild": "^0.24.0",
     "eslint": "^9.39.4",

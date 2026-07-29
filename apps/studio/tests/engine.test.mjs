@@ -15,7 +15,11 @@ ok(typeof eng.init === "function", "init() exists");
 ok(Array.isArray(win.DubnatorFreqs) && win.DubnatorFreqs.length === 10, "DubnatorFreqs is 10 bands");
 
 section("init() builds the graph");
-await eng.init();
+const firstInit = eng.init();
+const concurrentInit = eng.init();
+await concurrentInit;
+ok(eng.ready === true, "concurrent init callers wait for the complete graph");
+await firstInit;
 ok(eng.ready === true, "ready === true after init");
 ok(!!eng.deckA && !!eng.deckB, "two decks created");
 ok(!!eng.reverb && !!eng.echoDelay && !!eng.siren && !!eng.samples, "reverb/echo/siren/samples present");

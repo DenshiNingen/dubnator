@@ -757,12 +757,28 @@
     constructor() {
       this.ctx = null;
       this.ready = false;
+      this._initPromise = null;
       this.echoType = 1;
       this.dubFilterRoute = "music"; // music | master | samples | off
     }
 
     async init() {
-      if (this.ctx) return;
+      if (this.ready) return;
+      if (this._initPromise) return this._initPromise;
+      this._initPromise = this._initialize();
+      try {
+        return await this._initPromise;
+      } catch (error) {
+        const failedContext = this.ctx;
+        this.ctx = null;
+        this.ready = false;
+        this._initPromise = null;
+        try { await failedContext?.close(); } catch (_) {}
+        throw error;
+      }
+    }
+
+    async _initialize() {
       // latencyHint "interactive" = lowest output latency (snappier key-to-sound,
       // matters most in the Tauri/WKWebView build whose Core Audio buffer is larger).
       const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
