@@ -581,7 +581,7 @@ test("gain, trim, EQ and centre faders expose an exact neutral pad", () => {
   }
 
   // MIX / Deck A Gain: 2/3 × 1.5 = unity (0 dB).
-  manager.handleMidi({ deviceId: "in-a", data: [0x90, gridNote(2, 0), 127] });
+  manager.handleMidi({ deviceId: "in-a", data: [0x90, gridNote(1, 0), 127] });
   assert.equal(fired.at(-1).id, "deckA.gain");
   assert.ok(Math.abs(fired.at(-1).value * 1.5 - 1) < 1e-12);
 
@@ -598,19 +598,84 @@ test("gain, trim, EQ and centre faders expose an exact neutral pad", () => {
   assert.equal(fired.at(-1).value, 0.5);
 });
 
+test("isolator faders use a tapered audio curve with finer control near unity", () => {
+  const manager = new LaunchpadMiniMk3Manager({ catalog });
+  const expectedDb = [-70, -36, -20, -12, -7, -3, 0, 12];
+  for (const band of ["sub", "bass", "mid", "high", "top"]) {
+    const steps = manager._surfaceSteps(`kill.${band}.trim`);
+    const actualDb = Array.from(steps, (value) => Math.round((-70 + value * 82) * 10) / 10);
+    assert.deepEqual(actualDb, expectedDb, `${band} uses the tapered fader law`);
+    assert.ok(
+      Math.abs(steps[6] - 70 / 82) < 1e-12,
+      `${band} keeps an exact 0 dB pad`,
+    );
+  }
+});
+
+test("all channel, source, return and send levels use an audio-tapered surface", () => {
+  const manager = new LaunchpadMiniMk3Manager({ catalog });
+  const gainControls = new Map([
+    ["master.gain", 1.5],
+    ["deckA.gain", 1.5],
+    ["deckB.gain", 1.5],
+    ["in1.gain", 1.5],
+    ["in2.gain", 1.5],
+    ["aux.gain", 1.5],
+    ["reverb.ret", 1.5],
+    ["siren.gain", 1.2],
+    ["samples.gain", 1],
+    ["reverb.send", 1],
+    ["echo.send", 1],
+    ["echo.dw", 1],
+    ["reverb.dw", 1],
+    ["samples.rev", 1],
+    ["samples.echo", 1],
+    ["aux.revlevel", 1],
+    ["aux.echolevel", 1],
+    ["siren.revsend", 1],
+    ["siren.echosend", 1],
+  ]);
+  for (const [id, maxGain] of gainControls) {
+    const control = catalog.find((entry) => entry.id === id);
+    assert.equal(control.surfaceLaw, "audio", `${id} declares an audio fader law`);
+    const steps = manager._surfaceSteps(id);
+    assert.equal(steps[0], 0, `${id} starts fully off`);
+    assert.ok(steps.every((value, index) => index === 0 || value > steps[index - 1]), `${id} steps increase monotonically`);
+    assert.ok(Math.abs(steps.at(-1) - 1) < 1e-12, `${id} reaches its full range`);
+
+    const db = Array.from(steps.slice(1), (value) => Math.round(20 * Math.log10(value * maxGain)));
+    assert.deepEqual(
+      db,
+      maxGain > 1 ? [-36, -20, -12, -7, -3, 0, Math.round(20 * Math.log10(maxGain))] : [-36, -20, -12, -7, -3, -1, 0],
+      `${id} follows the shared audio taper`,
+    );
+  }
+
+  const flat = catalog.find(({ id }) => id === "flat.gain");
+  assert.equal(flat.surfaceLaw, "audio-db");
+  assert.deepEqual(
+    Array.from(manager._surfaceSteps("flat.gain"), (value) => Math.round(-24 + value * 36)),
+    [-24, -18, -12, -7, -3, 0, 6, 12],
+  );
+
+  for (const id of ["geqA.0", "paramA0.gain", "echo.fb", "xfade"]) {
+    assert.equal(catalog.find((entry) => entry.id === id).surfaceLaw, undefined, `${id} keeps its parameter-specific curve`);
+  }
+});
+
 test("unipolar fader LEDs are off at zero and fill from the bottom", () => {
   const { manager } = setup();
   const colours = { dim: 5, bright: 7 };
 
-  manager.values["deckA.gain"] = 0;
-  assert.deepEqual(Array.from(manager._rangeColours("deckA.gain", colours)), Array(8).fill(0));
+  manager.values["echo.fb"] = 0;
+  assert.deepEqual(Array.from(manager._rangeColours("echo.fb", colours)), Array(8).fill(0));
 
-  manager.values["deckA.gain"] = 0.5;
-  const halfway = Array.from(manager._rangeColours("deckA.gain", colours));
+  manager.values["echo.fb"] = 0.5;
+  const halfway = Array.from(manager._rangeColours("echo.fb", colours));
   assert.deepEqual(halfway, [0, 0, 0, 7, 7, 7, 7, 7]);
 
-  manager.values["deckA.gain"] = 1;
-  assert.deepEqual(Array.from(manager._rangeColours("deckA.gain", colours)), Array(8).fill(7));
+  manager.values["echo.fb"] = 1;
+  assert.deepEqual(Array.from(manager._rangeColours("echo.fb", colours)), Array(8).fill(7));
 });
 
 test("deck end mode uses a coloured STOP / LOOP / NEXT Launchpad selector", () => {
@@ -638,7 +703,7 @@ test("metered gains show live VU, fader position and peak hold", () => {
   manager.meters["deckA.gain"] = 0.5;
   assert.deepEqual(
     Array.from(manager._rangeColours("deckA.gain", colours)),
-    [0, 0, 3, 0, 23, 23, 23, 23],
+    [0, 3, 0, 0, 23, 23, 23, 23],
     "green VU fills upward and white marks the fader position",
   );
 

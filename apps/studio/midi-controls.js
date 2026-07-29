@@ -2,8 +2,27 @@
 // App because they close over React state; identity/labels stay data-only here.
 (function () {
   const freqs10 = [32, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+  // Launchpad isolator fader law. Equal physical steps are deliberately not
+  // equal dB steps: the useful area near unity gets fine control, then the
+  // attenuation accelerates towards silence. The bottom pad remains KILL.
+  const killSurfaceSteps = [-70, -36, -20, -12, -7, -3, 0, 12]
+    .map((db) => (db + 70) / 82);
+  // Audio-level controls use a conventional fader taper rather than equal
+  // linear-amplitude jumps. Surfaces with headroom reserve the top pad for
+  // boost; unity-limited sends/returns use the last two pads for −1 and 0 dB.
+  const gainSurfaceSteps = (maxGain) => {
+    const dbSteps = maxGain > 1
+      ? [-Infinity, -36, -20, -12, -7, -3, 0, 20 * Math.log10(maxGain)]
+      : [-Infinity, -36, -20, -12, -7, -3, -1, 0];
+    return dbSteps.map((db) => db === -Infinity ? 0 : Math.pow(10, db / 20) / maxGain);
+  };
+  const gainSteps15 = gainSurfaceSteps(1.5);
+  const gainSteps12 = gainSurfaceSteps(1.2);
+  const gainSteps1 = gainSurfaceSteps(1);
+  const flatGainSteps = [-24, -18, -12, -7, -3, 0, 6, 12]
+    .map((db) => (db + 24) / 36);
   const controls = [
-    { id: "master.gain", label: "Master Gain", type: "range", surfaceNeutral: 2 / 3 },
+    { id: "master.gain", label: "Master Gain", type: "range", surfaceNeutral: 2 / 3, surfaceSteps: gainSteps15, surfaceLaw: "audio" },
     { id: "master.lim", label: "Master Lim Thresh", type: "range" },
     { id: "xfade", label: "Crossfader", type: "range", bipolar: true, surfaceNeutral: 0.5 },
     { id: "kill.sub", label: "Kill — Sub", type: "button" },
@@ -11,18 +30,18 @@
     { id: "kill.mid", label: "Kill — Mid", type: "button" },
     { id: "kill.high", label: "Kill — High", type: "button" },
     { id: "kill.top", label: "Kill — Top", type: "button" },
-    { id: "reverb.send", label: "Reverb Send", type: "range" },
-    { id: "reverb.ret", label: "Reverb Return", type: "range", surfaceNeutral: 2 / 3 },
-    { id: "echo.send", label: "Echo Send", type: "range" },
+    { id: "reverb.send", label: "Reverb Send", type: "range", surfaceSteps: gainSteps1, surfaceLaw: "audio" },
+    { id: "reverb.ret", label: "Reverb Return", type: "range", surfaceNeutral: 2 / 3, surfaceSteps: gainSteps15, surfaceLaw: "audio" },
+    { id: "echo.send", label: "Echo Send", type: "range", surfaceSteps: gainSteps1, surfaceLaw: "audio" },
     { id: "echo.fb", label: "Echo Feedback", type: "range" },
     { id: "echo.time", label: "Echo Time", type: "range" },
     { id: "music.rev", label: "Music→Reverb", type: "button" },
     { id: "music.echo", label: "Music→Echo", type: "button" },
     { id: "dubfilter.cutoff", label: "Dub Filter Cutoff", type: "range" },
-    { id: "siren.gain", label: "Siren Gain", type: "range", surfaceNeutral: 5 / 6 },
-    { id: "samples.gain", label: "Samples Gain", type: "range" },
+    { id: "siren.gain", label: "Siren Gain", type: "range", surfaceNeutral: 5 / 6, surfaceSteps: gainSteps12, surfaceLaw: "audio" },
+    { id: "samples.gain", label: "Samples Gain", type: "range", surfaceSteps: gainSteps1, surfaceLaw: "audio" },
     { id: "echo.sat", label: "Echo Saturation", type: "range" },
-    { id: "echo.dw", label: "Echo Return", type: "range" },
+    { id: "echo.dw", label: "Echo Return", type: "range", surfaceSteps: gainSteps1, surfaceLaw: "audio" },
     { id: "echo.filterfreq", label: "Echo Filter Freq", type: "range" },
     { id: "echo.wow", label: "Echo Wow/Flutter", type: "range" },
     { id: "echo.robotic", label: "Echo Robotic", type: "button" },
@@ -36,8 +55,8 @@
     { id: "dubfilter.on", label: "Dub Filter On", type: "button" },
     { id: "siren.pitch", label: "Siren Pitch", type: "range" },
     { id: "siren.pan", label: "Siren Auto-Pan", type: "range" },
-    { id: "samples.rev", label: "Samples→Reverb", type: "range" },
-    { id: "samples.echo", label: "Samples→Echo", type: "range" },
+    { id: "samples.rev", label: "Samples→Reverb", type: "range", surfaceSteps: gainSteps1, surfaceLaw: "audio" },
+    { id: "samples.echo", label: "Samples→Echo", type: "range", surfaceSteps: gainSteps1, surfaceLaw: "audio" },
     { id: "deckA.play", label: "Deck A Play/Pause", type: "button", momentary: true },
     { id: "deckB.play", label: "Deck B Play/Pause", type: "button", momentary: true },
     { id: "deckA.stop", label: "Deck A Stop", type: "button", momentary: true },
@@ -52,26 +71,26 @@
     { id: "master.dim", label: "Master Dim", type: "button" },
     { id: "pure.sub", label: "Pure Sub-Bass", type: "button" },
     { id: "echo.sync", label: "Echo Tempo-Sync", type: "button" },
-    { id: "reverb.dw", label: "Reverb Dry/Wet", type: "range" },
+    { id: "reverb.dw", label: "Reverb Dry/Wet", type: "range", surfaceSteps: gainSteps1, surfaceLaw: "audio" },
     { id: "siren.lfo1rate", label: "Siren LFO1 Rate", type: "range" },
     { id: "siren.lfo1depth", label: "Siren LFO1 Depth", type: "range" },
     { id: "siren.lfo2rate", label: "Siren LFO2 Rate", type: "range" },
     { id: "siren.lfo2depth", label: "Siren LFO2 Depth", type: "range" },
     { id: "siren.bits", label: "Siren Bitcrush", type: "range" },
     { id: "siren.sr", label: "Siren SR Reduce", type: "range" },
-    { id: "aux.revlevel", label: "Aux→Reverb Level", type: "range" },
-    { id: "aux.echolevel", label: "Aux→Echo Level", type: "range" },
+    { id: "aux.revlevel", label: "Aux→Reverb Level", type: "range", surfaceSteps: gainSteps1, surfaceLaw: "audio" },
+    { id: "aux.echolevel", label: "Aux→Echo Level", type: "range", surfaceSteps: gainSteps1, surfaceLaw: "audio" },
     { id: "deckA.cue", label: "Deck A Set Cue", type: "button", momentary: true },
     { id: "deckA.jumpcue", label: "Deck A Jump Cue", type: "button", momentary: true },
     { id: "deckB.cue", label: "Deck B Set Cue", type: "button", momentary: true },
     { id: "deckB.jumpcue", label: "Deck B Jump Cue", type: "button", momentary: true },
-    { id: "deckA.gain", label: "Deck A Gain", type: "range", surfaceNeutral: 2 / 3 },
+    { id: "deckA.gain", label: "Deck A Gain", type: "range", surfaceNeutral: 2 / 3, surfaceSteps: gainSteps15, surfaceLaw: "audio" },
     { id: "deckA.pan", label: "Deck A Pan", type: "range", bipolar: true, surfaceNeutral: 0.5 },
-    { id: "deckB.gain", label: "Deck B Gain", type: "range", surfaceNeutral: 2 / 3 },
+    { id: "deckB.gain", label: "Deck B Gain", type: "range", surfaceNeutral: 2 / 3, surfaceSteps: gainSteps15, surfaceLaw: "audio" },
     { id: "deckB.pan", label: "Deck B Pan", type: "range", bipolar: true, surfaceNeutral: 0.5 },
-    { id: "in1.gain", label: "IN 1 Gain", type: "range", surfaceNeutral: 2 / 3 },
-    { id: "in2.gain", label: "IN 2 Gain", type: "range", surfaceNeutral: 2 / 3 },
-    { id: "aux.gain", label: "Aux Gain", type: "range", surfaceNeutral: 2 / 3 },
+    { id: "in1.gain", label: "IN 1 Gain", type: "range", surfaceNeutral: 2 / 3, surfaceSteps: gainSteps15, surfaceLaw: "audio" },
+    { id: "in2.gain", label: "IN 2 Gain", type: "range", surfaceNeutral: 2 / 3, surfaceSteps: gainSteps15, surfaceLaw: "audio" },
+    { id: "aux.gain", label: "Aux Gain", type: "range", surfaceNeutral: 2 / 3, surfaceSteps: gainSteps15, surfaceLaw: "audio" },
     { id: "aux.hp", label: "Aux HP Filter", type: "range" },
     { id: "echo.filterq", label: "Echo Filter Q", type: "range" },
     { id: "echo.slide", label: "Echo Slide", type: "range" },
@@ -80,8 +99,8 @@
     { id: "dubfilter.sweeprate", label: "Dub Sweep Rate", type: "range" },
     { id: "master.hp", label: "Master HP Filter", type: "range" },
     { id: "samples.hp", label: "Samples HP Filter", type: "range" },
-    { id: "siren.revsend", label: "Siren Reverb Amount", type: "range" },
-    { id: "siren.echosend", label: "Siren Echo Amount", type: "range" },
+    { id: "siren.revsend", label: "Siren Reverb Amount", type: "range", surfaceSteps: gainSteps1, surfaceLaw: "audio" },
+    { id: "siren.echosend", label: "Siren Echo Amount", type: "range", surfaceSteps: gainSteps1, surfaceLaw: "audio" },
 
     // Complete performance surface. These are the remaining sound/transport
     // controls that can be touched in the rack but were not part of the
@@ -121,7 +140,7 @@
     { id: "xfade.curve.power", label: "Crossfader Equal Power", type: "button", momentary: true },
     { id: "xfade.curve.linear", label: "Crossfader Linear", type: "button", momentary: true },
     { id: "xfade.curve.sharp", label: "Crossfader Sharp", type: "button", momentary: true },
-    { id: "flat.gain", label: "Flat Mode Gain", type: "range", bipolar: true, surfaceNeutral: 2 / 3 },
+    { id: "flat.gain", label: "Flat Mode Gain", type: "range", bipolar: true, surfaceNeutral: 2 / 3, surfaceSteps: flatGainSteps, surfaceLaw: "audio-db" },
     { id: "reverb.bp", label: "Reverb Band-Pass", type: "button" },
     { id: "echo.type1", label: "Echo Type 1", type: "button", momentary: true },
     { id: "echo.type2", label: "Echo Type 2", type: "button", momentary: true },
@@ -178,6 +197,7 @@
         type: "range",
         bipolar: true,
         surfaceNeutral: 70 / 82,
+        surfaceSteps: killSurfaceSteps,
         surfaceKill: `kill.${band}`,
       },
       { id: `kill.${band}.freq`, label: `${band} Band Frequency`, type: "range" },

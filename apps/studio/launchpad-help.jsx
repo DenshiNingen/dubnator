@@ -46,7 +46,7 @@ function launchpadControlDescription(id, control, metered) {
     if (!band[2]) return `Engages or releases the full cut for the ${names[band[1]]} band.`;
     if (band[2] === "solo") return `Keeps ${names[band[1]]} audible while temporarily cutting every other band.`;
     if (band[2] === "trim") {
-      return `Adjusts ${names[band[1]]} gain. The bottom pad engages KILL; any higher pad releases it.${metered ? " LEDs also show its live level." : ""}`;
+      return `Adjusts ${names[band[1]]} gain with fine control near 0 dB and progressively deeper cuts below. The bottom pad engages KILL; any higher pad releases it.${metered ? " LEDs also show its live level." : ""}`;
     }
     if (band[2] === "freq") return `Moves the crossover frequency for the ${names[band[1]]} band.`;
     return `Adjusts resonance/Q for the ${names[band[1]]} band.`;
@@ -74,6 +74,10 @@ function launchpadControlDescription(id, control, metered) {
     "system.autoadvance": "Selects the deck end behaviour: bottom pads STOP, middle pads LOOP, top pads NEXT.",
   };
   if (exact[id]) return exact[id];
+
+  if (control?.surfaceLaw === "audio" || control?.surfaceLaw === "audio-db") {
+    return `Adjusts ${label} with an audio-tapered fader: fine control near unity and progressively deeper attenuation below.`;
+  }
 
   if (/\.play$/.test(id)) return `Plays or pauses ${label.replace(" Play/Pause", "")}.`;
   if (/\.stop$/.test(id)) return `Stops ${label.replace(" Stop", "")} and returns to the start.`;

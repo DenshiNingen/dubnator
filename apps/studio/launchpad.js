@@ -849,6 +849,11 @@
 
     _surfaceSteps(id) {
       const meta = this.meta.get(id) || {};
+      if (Array.isArray(meta.surfaceSteps)
+        && meta.surfaceSteps.length === 8
+        && meta.surfaceSteps.every((value) => Number.isFinite(value) && value >= 0 && value <= 1)) {
+        return [...meta.surfaceSteps];
+      }
       const neutral = Number(meta.surfaceNeutral);
       if (!(neutral > 0 && neutral < 1)) {
         return Array.from({ length: 8 }, (_, index) => index / 7);
