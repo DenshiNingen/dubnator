@@ -3956,6 +3956,40 @@ input[type="range"]:disabled { opacity: 0.35; }
   color: #ff9191;
 }
 
+.end-mode-selector {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  margin-top: 5px;
+}
+
+.end-mode-label {
+  margin-right: 2px;
+  color: var(--text-dim);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 8px;
+  letter-spacing: 0.18em;
+}
+
+.end-mode-option.stop.active {
+  border-color: #651c25;
+  background: linear-gradient(180deg, #ff7777, #d9424f);
+  color: #21070a;
+}
+
+.end-mode-option.loop.active {
+  border-color: #704015;
+  background: linear-gradient(180deg, #ffc066, #e88a2e);
+  color: #241305;
+}
+
+.end-mode-option.next.active {
+  border-color: #205d35;
+  background: linear-gradient(180deg, #7aec9f, #39bf69);
+  color: #06190c;
+}
+
 .echo-sync-select {
   min-height: 24px;
   border: 1px solid #333;

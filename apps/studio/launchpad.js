@@ -254,12 +254,12 @@
     ], "magenta", true),
     page("MASTER", "master", [
       "master.gain", "master.hp", "master.lim", "limiter.reverb.thresh",
-      "limiter.echo.thresh", "xfade",
+      "limiter.echo.thresh", "system.autoadvance",
     ], [
       "master.mono", "master.dim", "limiter.master.on", "limiter.reverb.on",
       "limiter.echo.on", "xfade.a", "xfade.center", "xfade.b",
       "xfade.curve.power", "xfade.curve.linear", "xfade.curve.sharp",
-      "recorder.toggle", "recorder.format", "system.autoadvance",
+      "recorder.toggle", "recorder.format",
       "system.rewindstop", "system.line", "system.multi",
     ]),
   ];
@@ -877,6 +877,15 @@
     _rangeColours(id, colours) {
       const value = Math.max(0, Math.min(1, Number(this.values[id]) || 0));
       const meta = this.meta.get(id) || {};
+      if (id === "system.autoadvance") {
+        const mode = value < 0.25 ? "stop" : value < 0.75 ? "loop" : "next";
+        return Array.from({ length: 8 }, (_, row) => {
+          const zone = row < 2 ? "next" : row < 6 ? "loop" : "stop";
+          if (zone !== mode) return 0;
+          const palette = zone === "stop" ? PALETTES.red : zone === "loop" ? PALETTES.orange : PALETTES.green;
+          return palette.bright;
+        });
+      }
       if (Object.prototype.hasOwnProperty.call(this.meters, id)) {
         return this._meterColours(id, value, meta);
       }

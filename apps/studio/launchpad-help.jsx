@@ -71,6 +71,7 @@ function launchpadControlDescription(id, control, metered) {
     "recorder.toggle": "Starts or stops master recording.",
     "recorder.format": "Switches the recording format between WAV and AIFF.",
     "system.advanced": "Enables advanced isolator controls and positive gain ranges.",
+    "system.autoadvance": "Selects the deck end behaviour: bottom pads STOP, middle pads LOOP, top pads NEXT.",
   };
   if (exact[id]) return exact[id];
 

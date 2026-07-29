@@ -613,6 +613,22 @@ test("unipolar fader LEDs are off at zero and fill from the bottom", () => {
   assert.deepEqual(Array.from(manager._rangeColours("deckA.gain", colours)), Array(8).fill(7));
 });
 
+test("deck end mode uses a coloured STOP / LOOP / NEXT Launchpad selector", () => {
+  const manager = new LaunchpadMiniMk3Manager({ catalog });
+  const master = manager.describePage(0, 7);
+  assert.equal(master.ranges[5], "system.autoadvance");
+
+  const expected = [
+    [0, [0, 0, 0, 0, 0, 0, PALETTES.red.bright, PALETTES.red.bright]],
+    [0.5, [0, 0, PALETTES.orange.bright, PALETTES.orange.bright, PALETTES.orange.bright, PALETTES.orange.bright, 0, 0]],
+    [1, [PALETTES.green.bright, PALETTES.green.bright, 0, 0, 0, 0, 0, 0]],
+  ];
+  for (const [value, colours] of expected) {
+    manager.values["system.autoadvance"] = value;
+    assert.deepEqual(Array.from(manager._rangeColours("system.autoadvance", PALETTES.green)), colours);
+  }
+});
+
 test("metered gains show live VU, fader position and peak hold", () => {
   let now = 0;
   const manager = new LaunchpadMiniMk3Manager({ catalog, now: () => now });

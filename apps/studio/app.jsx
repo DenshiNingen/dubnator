@@ -3,6 +3,9 @@ const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
 const FREQS_10 = [32, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 const ECHO_DIVS = ["1/4", "1/4.", "1/4t", "1/8", "1/8.", "1/8t", "1/16", "1/16t"];
+const DECK_END_MODES = ["stop", "loop", "next"];
+const deckEndModeFromValue = (value) => value < 0.25 ? "stop" : value < 0.75 ? "loop" : "next";
+const deckEndModeValue = (mode) => mode === "next" ? 1 : mode === "loop" ? 0.5 : 0;
 // A restrained performance starting point: tempo-related repeats, less low-end
 // build-up and a dark enough loop to sit behind the source instead of masking it.
 const DUB_ECHO_START = Object.freeze({
@@ -440,7 +443,7 @@ function App() {
     try { const data = JSON.parse(await f.text()); if (data && data.siren) setSiren((s) => ({ ...s, ...data.siren })); }
     catch (err) { console.error("Siren patch load failed", err); }
   };
-  const [autoAdvance, setAutoAdvance] = useState(false); // playlist auto-advance (opt-in)
+  const [deckEndMode, setDeckEndMode] = useState("stop"); // stop, repeat current track, or play the next playlist item
 
   // === MIDI mapping ===
   const mapperRef = useRef(null);
@@ -502,7 +505,7 @@ function App() {
     auxLevels, geqA, paramA, kills, flatGain, killTrims, killQ, killFreqs,
     pureSub, reverb, echo, dubFilter, sampleFx, master, revLim, echoLim,
     siren, sirenHeld, selectedSample, flashIdx, recording, recFormat,
-    advanced, autoAdvance, rewindStop, micOn,
+    advanced, deckEndMode, rewindStop, micOn,
   };
 
   // === setup deck callbacks ===
@@ -799,10 +802,10 @@ function App() {
   // === Global presets — capture/restore the full console state ===
   const PRESET_KEY = "dubnator.preset.autoload.v1";
   const buildPreset = () => ({
-    version: 2,
+    version: 3,
     geqA, geqB, paramA, kills, reverb, echo, master, dubFilter, sampleFx,
     sampleSlotBypass, siren, crossfade, crossfadeCurve, musicSends, auxSends, auxLevels, revLim, echoLim,
-    advanced, eqSelect, rewindStop, autoAdvance, displayMode, specMode, specSource, logoAlpha, flatGain, killTrims, killQ, killFreqs, pureSub, view,
+    advanced, eqSelect, rewindStop, deckEndMode, displayMode, specMode, specSource, logoAlpha, flatGain, killTrims, killQ, killFreqs, pureSub, view,
     deckA: { gain: deckA.gain, pan: deckA.pan, mute: deckA.mute, autoGain: deckA.autoGain, rewindLen: deckA.rewindLen },
     deckB: { gain: deckB.gain, pan: deckB.pan, mute: deckB.mute, autoGain: deckB.autoGain, rewindLen: deckB.rewindLen },
   });
@@ -835,7 +838,10 @@ function App() {
     if (typeof p.advanced === "boolean") setAdvanced(p.advanced);
     if (typeof p.eqSelect === "string") setEqSelect(p.eqSelect);
     if (typeof p.rewindStop === "boolean") setRewindStop(p.rewindStop);
-    if (typeof p.autoAdvance === "boolean") setAutoAdvance(p.autoAdvance);
+    if (DECK_END_MODES.includes(p.deckEndMode)) setDeckEndMode(p.deckEndMode);
+    // Presets from the old AUTO:ON/OFF model migrate naturally: ON becomes
+    // NEXT, while OFF becomes the new non-repeating STOP default.
+    else if (typeof p.autoAdvance === "boolean") setDeckEndMode(p.autoAdvance ? "next" : "stop");
     if (typeof p.displayMode === "string") setDisplayMode(p.displayMode);
     if (typeof p.specMode === "string") setSpecMode(p.specMode);
     if (typeof p.specSource === "string") setSpecSource(p.specSource);
@@ -1110,7 +1116,9 @@ function App() {
       "recorder.toggle": (v) => { if (v > 0.5) actionsRef.current.toggleRecord?.(); },
       "recorder.format": (v) => { if (v > 0.5) setRecFormat((format) => format === "wav" ? "aiff" : "wav"); },
       "system.advanced": (v) => setAdvanced(v > 0.5),
-      "system.autoadvance": (v) => setAutoAdvance(v > 0.5),
+      // Keep the historical control id so existing MIDI bindings continue to
+      // work; it is now a three-zone STOP / LOOP / NEXT selector.
+      "system.autoadvance": (v) => setDeckEndMode(deckEndModeFromValue(v)),
       "system.rewindstop": (v) => setRewindStop(v > 0.5),
       "system.mic": (v) => { if (v > 0.5) actionsRef.current.toggleMic?.(); },
       "system.line": (v) => { if (v > 0.5) actionsRef.current.toggleLine?.(); },
@@ -1383,7 +1391,7 @@ function App() {
       "recorder.toggle": recording ? 1 : 0,
       "recorder.format": recFormat === "aiff" ? 1 : 0,
       "system.advanced": advanced ? 1 : 0,
-      "system.autoadvance": autoAdvance ? 1 : 0,
+      "system.autoadvance": deckEndModeValue(deckEndMode),
       "system.rewindstop": rewindStop ? 1 : 0,
       "system.mic": micOn ? 1 : 0,
       "system.line": lineOn ? 1 : 0,
@@ -1433,7 +1441,7 @@ function App() {
     crossfade, crossfadeCurve, kills, killTrims, killFreqs, killQ, flatGain,
     musicSends, auxSends, auxLevels, pureSub, deckA, deckB, inputs, geqA,
     paramA, revLim, echoLim, selectedSample, flashIdx, recording, recFormat,
-    advanced, autoAdvance, rewindStop, micOn,
+    advanced, deckEndMode, rewindStop, micOn,
   ]);
   const midiToggleMomentary = (id) => {
     const m = mapperRef.current; if (!m) return;
@@ -1777,25 +1785,25 @@ function App() {
   };
   const loadAndPlayA = loadAndPlay("A");
   const loadAndPlayB = loadAndPlay("B");
-  // When a playlist track ends (auto-advance on), load + play the next one.
-  const autoAdvanceDeck = (which) => {
+  // NEXT plays forward through the playlist without wrapping at its end.
+  const advanceDeckAtEnd = (which) => {
     const d = which === "A" ? eng.deckA : eng.deckB;
     const setD = which === "A" ? setDeckA : setDeckB;
-    Promise.resolve(d.nextTrack()).then(() => {
+    Promise.resolve(d.nextTrack({ wrap: false })).then((advanced) => {
+      if (!advanced) return;
       d.play();
       setD((s) => ({ ...s, ...LOOP_RESET, name: d.name, playlistIdx: d.playlistIdx, playing: true, time: 0, dur: d.getDuration() }));
     });
   };
   useEffect(() => {
     if (!ready) return;
-    const setup = (d, which, plLen) => {
-      const adv = autoAdvance && plLen > 1;
-      d.setLoopSingle(!adv);
-      d.onTrackEnd = adv ? () => autoAdvanceDeck(which) : null;
+    const setup = (d, which) => {
+      d.setLoopSingle(deckEndMode === "loop");
+      d.onTrackEnd = deckEndMode === "next" ? () => advanceDeckAtEnd(which) : null;
     };
-    setup(eng.deckA, "A", deckA.playlist.length);
-    setup(eng.deckB, "B", deckB.playlist.length);
-  }, [autoAdvance, deckA.playlist.length, deckB.playlist.length, ready]);
+    setup(eng.deckA, "A");
+    setup(eng.deckB, "B");
+  }, [deckEndMode, deckA.playlist.length, deckB.playlist.length, ready]);
 
   const refreshMicDevices = async () => {
     if (!eng.listInputDevices) return;
@@ -1985,7 +1993,7 @@ function App() {
     crossfadeCurve, kills, killTrims, killFreqs, killQ, flatGain, musicSends,
     auxSends, auxLevels, pureSub, deckA, deckB, inputs, geqA, paramA, revLim,
     echoLim, selectedSample, flashIdx, recording, recFormat, advanced,
-    autoAdvance, rewindStop, micOn, lineOn, multiOn, echoThrowHeld,
+    deckEndMode, rewindStop, micOn, lineOn, multiOn, echoThrowHeld,
   ]);
 
   // Hardware VU feedback is quantized to the Launchpad's eight rows and capped
@@ -3227,11 +3235,23 @@ function App() {
                 </button>
                 <button className={`btn-xs btn ${midiOpen ? "active" : ""}`}
                   onClick={() => setMidiOpen(true)} title="MIDI controller mapping">MIDI</button>
-                <button className={`btn-xs btn ${autoAdvance ? "active" : ""}`}
-                  onClick={() => setAutoAdvance((v) => !v)}
-                  title="Auto-advance to the next playlist track when one ends">
-                  AUTO:{autoAdvance ? "ON" : "OFF"}
-                </button>
+              </div>
+              <div className="end-mode-selector" role="radiogroup" aria-label="Deck end mode">
+                <span className="end-mode-label">END</span>
+                {DECK_END_MODES.map((mode) => (
+                  <button key={mode}
+                    className={`btn-xs btn end-mode-option ${mode} ${deckEndMode === mode ? "active" : ""}`}
+                    role="radio"
+                    aria-checked={deckEndMode === mode}
+                    onClick={() => setDeckEndMode(mode)}
+                    title={mode === "stop"
+                      ? "Stop when the current track ends"
+                      : mode === "loop"
+                        ? "Repeat the current track"
+                        : "Play the next playlist track, then stop after the last"}>
+                    {mode.toUpperCase()}
+                  </button>
+                ))}
               </div>
               <div className="strip-readout" style={{ marginTop: 4 }}>
                 <span>HP FILTER</span>

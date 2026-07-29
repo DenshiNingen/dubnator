@@ -152,7 +152,7 @@
     { id: "recorder.toggle", label: "Recorder Start / Stop", type: "button", momentary: true },
     { id: "recorder.format", label: "Recorder WAV / AIFF", type: "button", momentary: true },
     { id: "system.advanced", label: "Advanced Mode", type: "button" },
-    { id: "system.autoadvance", label: "Playlist Auto Advance", type: "button" },
+    { id: "system.autoadvance", label: "Deck End Mode", type: "range" },
     { id: "system.rewindstop", label: "Rewind Stop Mode", type: "button" },
     { id: "system.mic", label: "Mic / Aux Capture", type: "button", momentary: true },
     { id: "system.line", label: "Line Input", type: "button", momentary: true },

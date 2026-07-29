@@ -306,6 +306,26 @@ section("playlist auto-advance (loop vs play-through + onTrackEnd)");
   ok(advanced === 1, "manual stop suppresses auto-advance");
   eng.deckA.setLoopSingle(true);
   eng.deckA.onTrackEnd = null;
+
+  // Manual next still wraps, but automatic NEXT can explicitly stop at the
+  // final playlist item instead of cycling back to the first.
+  const originalPlaylist = eng.deckA.playlist;
+  const originalPlaylistIdx = eng.deckA.playlistIdx;
+  const originalLoadPlaylistIndex = eng.deckA.loadPlaylistIndex;
+  let loadedIndex = -1;
+  eng.deckA.playlist = [{ name: "one" }, { name: "two" }];
+  eng.deckA.loadPlaylistIndex = async function (index) {
+    loadedIndex = index;
+    this.playlistIdx = index;
+  };
+  eng.deckA.playlistIdx = 1;
+  ok(await eng.deckA.nextTrack({ wrap: false }) === false, "NEXT stops at the final playlist item");
+  ok(loadedIndex === -1, "final NEXT does not reload the first track");
+  ok(await eng.deckA.nextTrack() === true, "manual next still wraps");
+  ok(loadedIndex === 0, "manual next wraps to the first track");
+  eng.deckA.playlist = originalPlaylist;
+  eng.deckA.playlistIdx = originalPlaylistIdx;
+  eng.deckA.loadPlaylistIndex = originalLoadPlaylistIndex;
 }
 
 section("aux / mic input bus (IN 3-4)");

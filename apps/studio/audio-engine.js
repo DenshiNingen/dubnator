@@ -135,9 +135,12 @@
       this.playlistIdx = i;
       await this.load(this.playlist[i]);
     }
-    async nextTrack() {
-      if (!this.playlist.length) return;
-      await this.loadPlaylistIndex((this.playlistIdx + 1) % this.playlist.length);
+    async nextTrack(options = {}) {
+      if (!this.playlist.length) return false;
+      const next = this.playlistIdx + 1;
+      if (options.wrap === false && next >= this.playlist.length) return false;
+      await this.loadPlaylistIndex(next % this.playlist.length);
+      return true;
     }
     async prevTrack() {
       if (!this.playlist.length) return;
