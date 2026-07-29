@@ -4,6 +4,8 @@ const { useState, useEffect, useRef, useCallback, useMemo } = React;
 const FREQS_10 = [32, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 const ECHO_DIVS = ["1/4", "1/4.", "1/4t", "1/8", "1/8.", "1/8t", "1/16", "1/16t"];
 const DECK_END_MODES = ["stop", "loop", "next"];
+const LAUNCHPAD_BRIGHTNESS_LEVELS = [0, 18, 36, 54, 73, 91, 109, 127];
+const LAUNCHPAD_BRIGHTNESS_KEY = "dubnator.launchpad.brightness.v1";
 const deckEndModeFromValue = (value) => value < 0.25 ? "stop" : value < 0.75 ? "loop" : "next";
 const deckEndModeValue = (mode) => mode === "next" ? 1 : mode === "loop" ? 0.5 : 0;
 // A restrained performance starting point: tempo-related repeats, less low-end
@@ -463,6 +465,16 @@ function App() {
   const actionsRef = useRef({});
   const liveStateRef = useRef({});
   const [launchpads, setLaunchpads] = useState([]);
+  const [launchpadBrightness, setLaunchpadBrightness] = useState(() => {
+    try {
+      const stored = localStorage.getItem(LAUNCHPAD_BRIGHTNESS_KEY);
+      if (stored === null) return null;
+      const value = Math.round(Number(stored));
+      return Number.isFinite(value) ? Math.max(0, Math.min(127, value)) : null;
+    } catch (_) {
+      return null;
+    }
+  });
   const launchpadHelpAvailable = launchpads.some((device) => device.connected);
   const activeHelpView = launchpadHelpAvailable ? helpView : "keyboard";
   const [launchpadReversed, setLaunchpadReversed] = useState(false);
@@ -941,6 +953,7 @@ function App() {
       } catch (_) {}
       launchpadRef.current = new LP.LaunchpadMiniMk3Manager({
         catalog: MIDI_CONTROLS,
+        brightness: launchpadBrightness,
         orientations: launchpadOrientations,
         onControl: (id, value, event) => {
           const mapper = mapperRef.current;
@@ -1275,6 +1288,12 @@ function App() {
     setLaunchpadReversed(reversed);
     if (launchpadRef.current) launchpadRef.current.setReverse(reversed);
     try { localStorage.setItem("dubnator.launchpad.reverse.v1", reversed ? "1" : "0"); } catch (_) {}
+  };
+  const changeLaunchpadBrightness = (value) => {
+    const next = Math.max(0, Math.min(127, Math.round(Number(value))));
+    setLaunchpadBrightness(next);
+    if (launchpadRef.current) launchpadRef.current.setBrightness(next);
+    try { localStorage.setItem(LAUNCHPAD_BRIGHTNESS_KEY, String(next)); } catch (_) {}
   };
   const selectLaunchpadHelpPage = (role, page) => {
     if (launchpadRef.current) launchpadRef.current.selectPage(role, page, "help");
@@ -3272,6 +3291,30 @@ function App() {
                 onClick={() => setAdvanced(!advanced)}>
                 ADVANCED MODE
               </button>
+              {advanced && (
+                <div className="launchpad-brightness-control">
+                  <div className="strip-readout">
+                    <span>LAUNCHPAD LED</span>
+                    <span className="v mono">
+                      {launchpadBrightness === null
+                        ? "DEVICE"
+                        : `${Math.round((launchpadBrightness / 127) * 100)}%`}
+                    </span>
+                  </div>
+                  <select
+                    className="launchpad-brightness-select mono"
+                    aria-label="Launchpad LED brightness"
+                    value={launchpadBrightness === null ? "" : launchpadBrightness}
+                    onChange={(event) => changeLaunchpadBrightness(event.target.value)}>
+                    <option value="" disabled>USE DEVICE SETTING</option>
+                    {LAUNCHPAD_BRIGHTNESS_LEVELS.map((value, index) => (
+                      <option key={value} value={value}>
+                        {`LEVEL ${index + 1} / 8${index === 0 ? " · LOW" : index === 7 ? " · MAX" : ""}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           </div>
 

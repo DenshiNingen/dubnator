@@ -3990,6 +3990,32 @@ input[type="range"]:disabled { opacity: 0.35; }
   color: #06190c;
 }
 
+.launchpad-brightness-control {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #252a31;
+}
+
+.launchpad-brightness-select {
+  width: 100%;
+  min-height: 24px;
+  margin-top: 3px;
+  padding: 3px 5px;
+  border: 1px solid #313842;
+  border-bottom-color: #526171;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #20252c, #111419);
+  color: var(--text);
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.launchpad-brightness-select:focus {
+  outline: 1px solid #52c8e8;
+  outline-offset: 1px;
+}
+
 .echo-sync-select {
   min-height: 24px;
   border: 1px solid #333;

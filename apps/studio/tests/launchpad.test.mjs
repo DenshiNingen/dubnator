@@ -18,8 +18,10 @@ vm.runInContext(await readFile(join(ROOT, "launchpad.js"), "utf8"), sandbox, {
 const catalog = sandbox.window.DubnatorMidiControls;
 const {
   LaunchpadMiniMk3Manager,
+  BRIGHTNESS_LEVELS,
   PALETTES,
   PROGRAMMER_MODE,
+  brightnessMessage,
   controlTone,
   decodeControl,
   gridNote,
@@ -271,6 +273,37 @@ test("pairs two MIDI ports, ignores DAW ports and enters Programmer Mode", () =>
   const ledFrames = sent.filter(({ message }) => message[6] === 3);
   assert.equal(ledFrames.length, 2);
   assert.equal(ledFrames[0].message.length, 251, "one SysEx frame contains all 81 LEDs");
+});
+
+test("sets and reapplies LED brightness to every connected Launchpad", () => {
+  assert.deepEqual(Array.from(BRIGHTNESS_LEVELS), [0, 18, 36, 54, 73, 91, 109, 127]);
+  assert.deepEqual(
+    Array.from(brightnessMessage(64)),
+    [0xf0, 0x00, 0x20, 0x29, 0x02, 0x0d, 0x08, 64, 0xf7],
+  );
+
+  const sent = [];
+  const manager = new LaunchpadMiniMk3Manager({
+    catalog,
+    brightness: 64,
+    send: (outputId, message) => sent.push({ outputId, message: [...message] }),
+  });
+  manager.setPorts(ports());
+
+  const initialBrightness = sent.filter(({ message }) => message[6] === 0x08);
+  assert.deepEqual(initialBrightness.map(({ outputId }) => outputId), ["out-a", "out-b"]);
+  assert.ok(initialBrightness.every(({ message }) => message[7] === 64));
+  assert.ok(manager.getStatus().every(({ brightness }) => brightness === 64));
+
+  sent.length = 0;
+  assert.equal(manager.setBrightness(999), 127);
+  assert.deepEqual(
+    sent.map(({ outputId, message }) => ({ outputId, value: message[7] })),
+    [
+      { outputId: "out-a", value: 127 },
+      { outputId: "out-b", value: 127 },
+    ],
+  );
 });
 
 test("one Launchpad switches between all 16 pages by holding the top arrows", () => {

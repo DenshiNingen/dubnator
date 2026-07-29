@@ -9,6 +9,7 @@
   const PROGRAMMER_MODE = [...SYSEX, 0x0e, 0x01, 0xf7];
   const LIVE_MODE = [...SYSEX, 0x0e, 0x00, 0xf7];
   const FEEDBACK_EXTERNAL_ONLY = [...SYSEX, 0x0a, 0x00, 0x01, 0xf7];
+  const BRIGHTNESS_LEVELS = [0, 18, 36, 54, 73, 91, 109, 127];
   const SINGLE_ROLE_HOLD_MS = 450;
   const SINGLE_ROLE_BUTTONS = { 2: 0, 3: 1 }; // Physical top-row ← / →.
 
@@ -365,6 +366,18 @@
     return orientation === "ccw" ? "ccw" : "straight";
   }
 
+  function normalizeBrightness(value) {
+    if (value === null || value === undefined || value === "") return null;
+    const number = Number(value);
+    if (!Number.isFinite(number)) return null;
+    return Math.max(0, Math.min(127, Math.round(number)));
+  }
+
+  function brightnessMessage(value) {
+    const brightness = normalizeBrightness(value);
+    return brightness === null ? null : [...SYSEX, 0x08, brightness, 0xf7];
+  }
+
   // Normalize events from a unit that is physically rotated 90° counter-
   // clockwise into the same logical surface used by a straight Launchpad.
   // The original right column becomes the top page row, the original top row
@@ -469,6 +482,7 @@
       this.meterPeaks = new Map();
       this.devices = [];
       this.reverse = false;
+      this.brightness = normalizeBrightness(options.brightness);
       this.orientations = {};
       for (const [inputId, orientation] of Object.entries(options.orientations || {})) {
         this.orientations[inputId] = normalizeOrientation(orientation);
@@ -486,6 +500,19 @@
         this._configure(device);
       });
       this._status();
+    }
+
+    setBrightness(value) {
+      const next = normalizeBrightness(value);
+      this.brightness = next;
+      const message = brightnessMessage(next);
+      if (message) {
+        for (const device of this.devices) {
+          if (device.outputId) this.send(device.outputId, message);
+        }
+      }
+      this._status();
+      return next;
     }
 
     setPorts({ inputs = [], outputs = [] } = {}) {
@@ -523,6 +550,8 @@
       if (!device.outputId) return;
       this.send(device.outputId, PROGRAMMER_MODE);
       this.send(device.outputId, FEEDBACK_EXTERNAL_ONLY);
+      const brightness = brightnessMessage(this.brightness);
+      if (brightness) this.send(device.outputId, brightness);
       this.render(device, true);
     }
 
@@ -539,6 +568,7 @@
           outputId: device.outputId,
           name: device.name,
           connected: !!device.outputId,
+          brightness: this.brightness,
           role: device.role === 0 ? "LEFT / MIX" : "RIGHT / FX",
           roleIndex: device.role,
           single: this.devices.length === 1,
@@ -1004,6 +1034,7 @@
     LaunchpadMiniMk3Manager,
     PROGRAMMER_MODE,
     LIVE_MODE,
+    BRIGHTNESS_LEVELS,
     LEFT_PAGES,
     RIGHT_PAGES,
     PALETTES,
@@ -1011,6 +1042,7 @@
     METER_CONTROL_IDS,
     SINGLE_ROLE_HOLD_MS,
     SINGLE_ROLE_BUTTONS,
+    brightnessMessage,
     controlTone,
     pageTone,
     decodeControl,
