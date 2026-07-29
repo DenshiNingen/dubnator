@@ -296,6 +296,8 @@ function App() {
   const [crossfade, setCrossfade] = useState(0.5);
   const [crossfadeCurve, setCrossfadeCurve] = useState("power"); // power | linear | sharp
   const [playlistOpen, setPlaylistOpen] = useState(null); // null | "A" | "B"
+  const [deckLoadWarning, setDeckLoadWarning] = useState(null);
+  const deckLoadWarningTimerRef = useRef(null);
 
   // === aux/mic inputs (visual; mic permission could wire IN3-4) ===
   const [inputs, setInputs] = useState({
@@ -1748,6 +1750,24 @@ function App() {
   }, [view]);
 
   // file load
+  // Performance safety: never replace the buffer of a deck that is currently
+  // on air. The operator must stop it first; adding files to its playlist is
+  // still safe because that does not touch the playing buffer.
+  const canReplaceDeckTrack = (deckKey) => {
+    const deck = deckKey === "B" ? eng.deckB : eng.deckA;
+    if (!deck?.playing) return true;
+    setDeckLoadWarning({
+      deckKey,
+      message: `DECK-${deckKey} IS PLAYING · STOP IT BEFORE LOADING ANOTHER TRACK`,
+    });
+    if (deckLoadWarningTimerRef.current) clearTimeout(deckLoadWarningTimerRef.current);
+    deckLoadWarningTimerRef.current = setTimeout(() => setDeckLoadWarning(null), 3200);
+    return false;
+  };
+  useEffect(() => () => {
+    if (deckLoadWarningTimerRef.current) clearTimeout(deckLoadWarningTimerRef.current);
+  }, []);
+
   // Shared deck loader for both the hidden file inputs and drag-and-drop.
   // Adds files to the deck playlist; if the deck has no buffer yet, cues the
   // first one (decoding via the engine's AIFF fallback when needed).
@@ -1757,11 +1777,13 @@ function App() {
     await init();
     const engDeck = deckKey === "A" ? eng.deckA : eng.deckB;
     const setDeck = deckKey === "A" ? setDeckA : setDeckB;
+    const shouldLoad = opts.load || !engDeck.buffer;
+    if (shouldLoad && !canReplaceDeckTrack(deckKey)) return false;
     const startIdx = engDeck.playlist.length; // index of the first newly-added file
     files.forEach(f => engDeck.addToPlaylist(f));
     // Cue the dropped/loaded track when the deck is empty, or when the caller
     // forces it (an explicit drop onto a deck loads that track immediately).
-    if (opts.load || !engDeck.buffer) {
+    if (shouldLoad) {
       try {
         await engDeck.loadPlaylistIndex(startIdx);
         setDeck((s) => ({ ...s, name: files[0].name, playlist: [...s.playlist, ...files.map(f => f.name)], playlistIdx: startIdx, playing: false }));
@@ -1772,9 +1794,16 @@ function App() {
     } else {
       setDeck((s) => ({ ...s, playlist: [...s.playlist, ...files.map(f => f.name)] }));
     }
+    return true;
   };
-  const onFileA = (e) => { loadFilesToDeck("A", e.target.files); };
-  const onFileB = (e) => { loadFilesToDeck("B", e.target.files); };
+  const onFileA = (e) => {
+    loadFilesToDeck("A", Array.from(e.target.files || []));
+    e.target.value = "";
+  };
+  const onFileB = (e) => {
+    loadFilesToDeck("B", Array.from(e.target.files || []));
+    e.target.value = "";
+  };
   const [deckDropTarget, setDeckDropTarget] = useState(null); // "A" | "B" | null — drag highlight
   const onDeckDrop = (deckKey) => (e) => {
     e.preventDefault();
@@ -1786,10 +1815,10 @@ function App() {
   // A loaded track clears the engine's section loop; mirror that in the strip's
   // loop UI so the ⟳ indicator / IN point don't carry over to the new track.
   const LOOP_RESET = { loopOn: false, loopIn: 0 };
-  const nextTrackA = async () => { await init(); await eng.deckA.nextTrack(); setDeckA(s => ({ ...s, ...LOOP_RESET, playlistIdx: eng.deckA.playlistIdx, name: eng.deckA.name })); };
-  const prevTrackA = async () => { await init(); await eng.deckA.prevTrack(); setDeckA(s => ({ ...s, ...LOOP_RESET, playlistIdx: eng.deckA.playlistIdx, name: eng.deckA.name })); };
-  const nextTrackB = async () => { await init(); await eng.deckB.nextTrack(); setDeckB(s => ({ ...s, ...LOOP_RESET, playlistIdx: eng.deckB.playlistIdx, name: eng.deckB.name })); };
-  const prevTrackB = async () => { await init(); await eng.deckB.prevTrack(); setDeckB(s => ({ ...s, ...LOOP_RESET, playlistIdx: eng.deckB.playlistIdx, name: eng.deckB.name })); };
+  const nextTrackA = async () => { await init(); if (!canReplaceDeckTrack("A")) return; await eng.deckA.nextTrack(); setDeckA(s => ({ ...s, ...LOOP_RESET, playlistIdx: eng.deckA.playlistIdx, name: eng.deckA.name })); };
+  const prevTrackA = async () => { await init(); if (!canReplaceDeckTrack("A")) return; await eng.deckA.prevTrack(); setDeckA(s => ({ ...s, ...LOOP_RESET, playlistIdx: eng.deckA.playlistIdx, name: eng.deckA.name })); };
+  const nextTrackB = async () => { await init(); if (!canReplaceDeckTrack("B")) return; await eng.deckB.nextTrack(); setDeckB(s => ({ ...s, ...LOOP_RESET, playlistIdx: eng.deckB.playlistIdx, name: eng.deckB.name })); };
+  const prevTrackB = async () => { await init(); if (!canReplaceDeckTrack("B")) return; await eng.deckB.prevTrack(); setDeckB(s => ({ ...s, ...LOOP_RESET, playlistIdx: eng.deckB.playlistIdx, name: eng.deckB.name })); };
   // Load the currently-highlighted playlist track into a deck and start it (the
   // keyboard "Load & Play" shortcut). Falls back to the file picker when empty.
   const loadAndPlay = (which) => async () => {
@@ -1797,6 +1826,7 @@ function App() {
     const d = which === "A" ? eng.deckA : eng.deckB;
     const setD = which === "A" ? setDeckA : setDeckB;
     if (!d.playlist || !d.playlist.length) { document.getElementById(`deck${which}-file`)?.click(); return; }
+    if (!canReplaceDeckTrack(which)) return;
     try { await d.loadPlaylistIndex(d.playlistIdx); } catch (_) {}
     if (eng.canDeckPlay && !eng.canDeckPlay(which)) return;
     if (!d.playing) d.play();
@@ -2679,9 +2709,21 @@ function App() {
           deckKey={playlistOpen || "A"}
           deckA={deckA} deckB={deckB}
           setDeckA={setDeckA} setDeckB={setDeckB}
+          canReplaceDeckTrack={canReplaceDeckTrack}
           onClose={() => setPlaylistOpen(null)}
           onSwitchDeck={(d) => { setActiveDeck(d); setPlaylistOpen(d); }}
         />
+
+        {deckLoadWarning && ReactDOM.createPortal(
+          <div
+            className={`deck-load-warning deck-${deckLoadWarning.deckKey.toLowerCase()}`}
+            role="alert"
+            onClick={() => setDeckLoadWarning(null)}>
+            <span className="deck-load-warning-icon">!</span>
+            <span>{deckLoadWarning.message}</span>
+          </div>,
+          document.body
+        )}
 
         {/* HELP / KEYBOARD SHORTCUTS MODAL */}
         {helpOpen && ReactDOM.createPortal(

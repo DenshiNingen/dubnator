@@ -36,7 +36,7 @@ function fmtSavedDate(ts) {
 // Shows track #, name, duration (lazily decoded). Click row to load+select that track.
 // Per-row: ↑ ↓ (reorder), × (remove). Footer: + Add Files / Shuffle / Clear All.
 // Native drag-drop of audio files from OS supported.
-function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, onClose, onSwitchDeck }) {
+function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, canReplaceDeckTrack, onClose, onSwitchDeck }) {
   const [durations, setDurations] = useState({}); // key: `${deck}|${idx}|${name}` -> seconds
   const dropRef = useRef(null);
   const [dragOver, setDragOver] = useState(false);
@@ -111,6 +111,7 @@ function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, onClos
 
   const onLoad = async (i, play = true) => {
     if (!engDeck) return;
+    if (canReplaceDeckTrack && !canReplaceDeckTrack(deckKey)) return;
     try {
       await engDeck.loadPlaylistIndex(i);
       if (play) engDeck.play();
@@ -223,6 +224,7 @@ function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, onClos
   };
   const applyReconcile = async (skipMissing) => {
     if (!reconcile || !engDeck) return;
+    if (canReplaceDeckTrack && !canReplaceDeckTrack(deckKey)) return;
     const ordered = [];
     const missing = [];
     reconcile.tracks.forEach(name => {
@@ -351,6 +353,7 @@ function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, onClos
   };
 
   const importZip = async (file) => {
+    if (canReplaceDeckTrack && !canReplaceDeckTrack(deckKey)) return;
     if (typeof window.JSZip === "undefined") {
       showToast("ZIP library not loaded", "warn");
       return;
@@ -448,6 +451,7 @@ function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, onClos
     const files = Array.from(filesIn || []).filter(f => f.type.startsWith("audio/") || /\.(mp3|wav|flac|ogg|m4a|aac|opus)$/i.test(f.name));
     if (!files.length || !engDeck) return;
     const wasEmpty = engDeck.playlist.length === 0;
+    if (wasEmpty && canReplaceDeckTrack && !canReplaceDeckTrack(deckKey)) return;
     files.forEach(f => engDeck.addToPlaylist(f));
     if (wasEmpty) {
       await engDeck.loadPlaylistIndex(0);
