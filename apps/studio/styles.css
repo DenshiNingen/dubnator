@@ -3096,7 +3096,11 @@ input[type="range"]:disabled { opacity: 0.35; }
   .right-rail {
     grid-template-columns: minmax(0, 1.4fr) minmax(230px, 1fr);
   }
+}
 
+/* Section navigation belongs to every touch reflow, including landscape
+   tablets whose CSS width is wider than the portrait layout breakpoint. */
+@media (max-width: 900px), (pointer: coarse) and (max-width: 1280px) {
   .compact-rack-nav {
     position: sticky;
     top: env(safe-area-inset-top);

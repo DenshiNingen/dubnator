@@ -36,6 +36,7 @@ test("compact screens expose a sticky section navigator without widening the pag
   for (const id of ["rack-inputs", "rack-eq", "rack-decks", "rack-fx", "rack-kills", "rack-pads", "rack-output"]) {
     assert.match(app, new RegExp(`id="${id}"`), id);
   }
+  assert.match(css, /@media \(max-width: 900px\), \(pointer: coarse\) and \(max-width: 1280px\)/);
   assert.match(css, /\.compact-rack-nav-track\s*\{[\s\S]*?width: 0;[\s\S]*?overflow-x: auto/);
   assert.match(css, /#root\s*\{[\s\S]*?min-width: 0/);
 });

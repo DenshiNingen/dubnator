@@ -83,8 +83,8 @@ test("keeps every rack region inside the page viewport", async ({ page }, testIn
 
 test("compact rack navigation reaches and tracks distant controls", async ({ page }, testInfo) => {
   const compactProject = testInfo.project.name.startsWith("mobile")
-    || testInfo.project.name === "tablet-portrait";
-  test.skip(!compactProject, "Compact navigation is hidden above 900px");
+    || testInfo.project.name.startsWith("tablet");
+  test.skip(!compactProject, "Compact navigation is hidden on fine-pointer desktop layouts");
 
   await page.goto("/");
   const navigation = page.getByRole("navigation", { name: "Rack sections" });
