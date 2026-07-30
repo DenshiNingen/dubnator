@@ -33,19 +33,37 @@ export default defineConfig({
   },
   projects: [
     {
-      name: "desktop",
-      use: { viewport: { width: 1440, height: 1000 } },
+      name: "desktop-wide",
+      use: { viewport: { width: 1600, height: 1000 } },
     },
     {
-      name: "tablet",
+      name: "laptop",
+      use: { viewport: { width: 1280, height: 800 } },
+    },
+    {
+      name: "tablet-landscape",
       use: {
-        viewport: { width: 1024, height: 1366 },
+        viewport: { width: 1180, height: 820 },
+        hasTouch: true,
+      },
+    },
+    {
+      name: "tablet-portrait",
+      use: {
+        viewport: { width: 820, height: 1180 },
+        hasTouch: true,
+      },
+    },
+    {
+      name: "mobile-landscape",
+      use: {
+        viewport: { width: 844, height: 390 },
         hasTouch: true,
         isMobile: true,
       },
     },
     {
-      name: "mobile",
+      name: "mobile-portrait",
       use: {
         viewport: { width: 390, height: 844 },
         hasTouch: true,

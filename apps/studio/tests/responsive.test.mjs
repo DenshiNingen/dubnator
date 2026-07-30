@@ -19,7 +19,8 @@ test("uses the real device viewport without disabling pinch zoom", () => {
 });
 
 test("defines distinct tablet, phone, and coarse-pointer layouts", () => {
-  assert.match(css, /@media \(max-width: 1280px\)/);
+  assert.match(css, /@media \(min-width: 1101px\) and \(max-width: 1366px\) and \(pointer: fine\)/);
+  assert.match(css, /@media \(max-width: 1100px\), \(pointer: coarse\) and \(max-width: 1280px\)/);
   assert.match(css, /@media \(max-width: 900px\)/);
   assert.match(css, /@media \(max-width: 700px\)/);
   assert.match(css, /@media \(pointer: coarse\)/);
@@ -27,6 +28,15 @@ test("defines distinct tablet, phone, and coarse-pointer layouts", () => {
     css,
     /\.grid-top,\s*\.grid-mid,\s*\.grid-bottom,\s*\.right-rail,\s*\.transport-row\s*\{[\s\S]*?grid-template-columns: minmax\(0, 1fr\)/,
   );
+});
+
+test("compact screens expose a sticky section navigator without widening the page", () => {
+  assert.match(app, /aria-label="Rack sections"/);
+  for (const id of ["rack-inputs", "rack-eq", "rack-decks", "rack-fx", "rack-kills", "rack-pads", "rack-output"]) {
+    assert.match(app, new RegExp(`id="${id}"`), id);
+  }
+  assert.match(css, /\.compact-rack-nav-track\s*\{[\s\S]*?width: 0;[\s\S]*?overflow-x: auto/);
+  assert.match(css, /#root\s*\{[\s\S]*?min-width: 0/);
 });
 
 test("labels every main rack region for stable responsive placement", () => {

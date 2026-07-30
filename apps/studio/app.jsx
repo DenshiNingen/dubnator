@@ -76,6 +76,81 @@ function fmtTime(s) {
   return `${String(m).padStart(2, "0")}m ${String(ss).padStart(2, "0")}s`;
 }
 
+const COMPACT_RACK_SECTIONS = [
+  ["rack-inputs", "Inputs"],
+  ["rack-eq", "EQ"],
+  ["rack-decks", "Decks"],
+  ["rack-fx", "FX"],
+  ["rack-kills", "Kills"],
+  ["rack-pads", "Pads"],
+  ["rack-output", "Output"],
+];
+
+function CompactRackNav() {
+  const [active, setActive] = useState(COMPACT_RACK_SECTIONS[0][0]);
+  const trackRef = useRef(null);
+
+  useEffect(() => {
+    let frame = 0;
+    const updateActiveSection = () => {
+      frame = 0;
+      // Targets keep 50px of breathing room below the sticky navigator.
+      // Include that gap when deciding which section is currently "at" it.
+      const anchor = 96;
+      let current = COMPACT_RACK_SECTIONS[0][0];
+      for (const [id] of COMPACT_RACK_SECTIONS) {
+        const section = document.getElementById(id);
+        if (section && section.getBoundingClientRect().top <= anchor) current = id;
+      }
+      setActive(current);
+    };
+    const scheduleUpdate = () => {
+      if (!frame) frame = requestAnimationFrame(updateActiveSection);
+    };
+
+    updateActiveSection();
+    window.addEventListener("scroll", scheduleUpdate, { passive: true });
+    window.addEventListener("resize", scheduleUpdate);
+    return () => {
+      window.removeEventListener("scroll", scheduleUpdate);
+      window.removeEventListener("resize", scheduleUpdate);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  useEffect(() => {
+    const track = trackRef.current;
+    const button = track?.querySelector(`[data-rack-target="${active}"]`);
+    if (!track || !button) return;
+    const left = button.offsetLeft - (track.clientWidth - button.offsetWidth) / 2;
+    track.scrollTo({ left: Math.max(0, left), behavior: "smooth" });
+  }, [active]);
+
+  const jumpTo = (id) => {
+    setActive(id);
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  return (
+    <nav className="compact-rack-nav" aria-label="Rack sections">
+      <span className="compact-rack-nav-label mono">RACK</span>
+      <div className="compact-rack-nav-track" ref={trackRef}>
+        {COMPACT_RACK_SECTIONS.map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            data-rack-target={id}
+            className={active === id ? "active" : ""}
+            aria-current={active === id ? "location" : undefined}
+            onClick={() => jumpTo(id)}>
+            {label}
+          </button>
+        ))}
+      </div>
+    </nav>
+  );
+}
+
 
 function DeckStrip({ label, state, set, meter, play, stop, onFile, deck, onPrev, onNext, onRewind, onSetCue, onJumpCue, bpm = 120, onOpenPlaylist, dropProps, dropActive, midiPrefix }) {
   const [more, setMore] = useState(false); // collapse RWD/PAN · A-G · loop controls
@@ -2199,12 +2274,14 @@ function App() {
       <input id="deckA-file" type="file" accept="audio/*" multiple style={{ display: "none" }} onChange={onFileA} />
       <input id="deckB-file" type="file" accept="audio/*" multiple style={{ display: "none" }} onChange={onFileB} />
 
+      <CompactRackNav />
+
       <div className="grid-app">
         <div className="main-col">
       {/* ============ TOP ROW ============ */}
       <div className="grid-top">
         {/* MUSIC INPUTS */}
-        <div className="panel with-screws rack-music" style={{ position: "relative" }}>
+        <div id="rack-inputs" className="panel with-screws rack-music" style={{ position: "relative" }}>
           <div className="screw-bl"></div><div className="screw-br"></div>
           <div className="panel-body" style={{ paddingTop: 6 }}>
             <div className="col" style={{ gap: 0 }}>
@@ -2449,7 +2526,7 @@ function App() {
         {/* shared screen region — EQs (PANEL) or the display (SETUP/AUDIO) */}
         {mainView === "panel" ? (<>
         {/* 10 BAND GEQ */}
-        <div className="panel with-screws fill-v rack-geq">
+        <div id="rack-eq" className="panel with-screws fill-v rack-geq">
           <div className="screw-bl"></div><div className="screw-br"></div>
           <div className="panel-header">
             <span className="panel-title">10 Band Graphic Equalizer</span>
@@ -2538,7 +2615,7 @@ function App() {
       </div>{/* /grid-top */}
 
       {/* TRANSPORT (decks bar) */}
-      <div className="transport-row">
+      <div id="rack-decks" className="transport-row">
         <div className="panel with-screws xfade-block">
           <div className="screw-bl"></div><div className="screw-br"></div>
           <div className="xfade-cuts">
@@ -2591,7 +2668,7 @@ function App() {
 
 
       {/* ============ MID ROW ============ */}
-      <div className="grid-mid">
+      <div id="rack-fx" className="grid-mid">
         {/* DUB SIREN — compact */}
         <div className="panel with-screws rack-siren">
           <div className="screw-bl"></div><div className="screw-br"></div>
@@ -3161,7 +3238,7 @@ function App() {
       </div>
 
       {/* ============ BOTTOM ROW (KILLS only) ============ */}
-      <div className="grid-bottom">
+      <div id="rack-kills" className="grid-bottom">
         {/* KILLS */}
         {[
           { key: "sub", label: "SUB", color: "rgba(239,68,68,0.18)", lineColor: "#ef4444", freqLabels: ["20Hz", "150Hz"] },
@@ -3235,7 +3312,7 @@ function App() {
 
         {/* ============ RIGHT RAIL ============ */}
         <div className="right-rail">
-          <div className="panel with-screws rack-sample-triggers">
+          <div id="rack-pads" className="panel with-screws rack-sample-triggers">
             <div className="screw-bl"></div><div className="screw-br"></div>
             <div className="panel-header">
               <span className="panel-title">Sample Triggers</span>
@@ -3360,7 +3437,7 @@ function App() {
             </div>
           </div>
 
-          <div className="panel with-screws rack-limiters">
+          <div id="rack-output" className="panel with-screws rack-limiters">
             <div className="screw-bl"></div><div className="screw-br"></div>
             <div className="panel-header">
               <span className="panel-title">Limiters</span>
