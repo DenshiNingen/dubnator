@@ -103,6 +103,29 @@ test("compact rack navigation reaches and tracks distant controls", async ({ pag
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeLessThan(300);
 });
 
+test("focused controls and dialogs isolate global performance shortcuts", async ({ page }) => {
+  await page.goto("/");
+
+  const crossfader = page.getByRole("slider", { name: "Crossfader" });
+  const filterCutoff = page.getByRole("slider", { name: "CUTOFF" });
+  const crossfadeBefore = Number(await crossfader.getAttribute("aria-valuenow"));
+  const cutoffBefore = await filterCutoff.getAttribute("aria-valuenow");
+
+  await crossfader.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect.poll(async () => Number(await crossfader.getAttribute("aria-valuenow")))
+    .toBeGreaterThan(crossfadeBefore);
+  await expect(filterCutoff).toHaveAttribute("aria-valuenow", cutoffBefore);
+
+  const lowKill = page.locator(".grid-bottom .rack-kill").nth(1).getByRole("button", { name: "KILL" });
+  await page.getByTitle("Keyboard shortcuts (?)").click();
+  await expect(page.getByRole("dialog", { name: /Help · Keyboard/ })).toBeVisible();
+  await page.keyboard.press("x");
+  await expect(lowKill).not.toHaveClass(/active/);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: /Help · Keyboard/ })).toBeHidden();
+});
+
 test("tool windows stay reachable inside every screen", async ({ page }) => {
   await page.goto("/");
 

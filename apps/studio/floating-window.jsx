@@ -100,7 +100,8 @@ function FloatingWindow({
 }) {
   const floating = useFloatingBox(initial, minW, minH);
   const node = (
-    <div className={`floating-window panel with-screws ${className}`} style={floating.style}>
+    <div className={`floating-window panel with-screws ${className}`} role="dialog"
+      aria-label={title} style={floating.style}>
       <div className="screw-bl"></div>
       <div className="screw-br"></div>
       <div
@@ -109,9 +110,9 @@ function FloatingWindow({
         onPointerDown={floating.startDrag}
       >
         <span className="modal-traffic">
-          <span className="dot red" onClick={onClose}></span>
-          <span className="dot yellow"></span>
-          <span className="dot green"></span>
+          <button type="button" className="dot red" aria-label={`Close ${title}`} onClick={onClose}></button>
+          <span className="dot yellow" aria-hidden="true"></span>
+          <span className="dot green" aria-hidden="true"></span>
         </span>
         <span className="panel-title" style={{ flex: 1, textAlign: "center" }}>{title}</span>
         <button className="btn-xs btn" onClick={onClose}>✕</button>

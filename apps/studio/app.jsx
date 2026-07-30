@@ -1594,25 +1594,30 @@ function App() {
   const punchPrevRef = useRef({ sub: false, bass: false, mid: false, high: false, top: false });
 
   useEffect(() => {
-    const editable = (el) => !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+    const interactive = (el) => !!el && (
+      el.isContentEditable
+      || !!el.closest?.("input, textarea, select, button, [role='slider'], [role='radio'], [role='tab']")
+    );
 
     const down = (e) => {
-      if (editable(e.target)) return;
-      if (e.ctrlKey || e.metaKey) return;
       const k = e.key;
       const kl = k.toLowerCase();
       const shift = e.shiftKey;
 
       // ---- Help & window dismiss ----
-      if (k === "?" || (shift && k === "/")) { e.preventDefault(); setHelpOpen(v => !v); return; }
       if (k === "Escape") {
         e.preventDefault();
         if (mapperRef.current && mapperRef.current.isLearning()) { mapperRef.current.cancelLearn(); setMidiLearnId(null); return; }
         if (helpOpen) { setHelpOpen(false); return; }
         if (sirenSetupOpen) { setSirenSetupOpen(false); return; }
         if (playlistOpen) { setPlaylistOpen(null); return; }
+        if (midiOpen) { setMidiOpen(false); return; }
         return;
       }
+      if (interactive(e.target)) return;
+      if (e.ctrlKey || e.metaKey) return;
+      if (k === "?" || (shift && k === "/")) { e.preventDefault(); setHelpOpen(v => !v); return; }
+      if (helpOpen || sirenSetupOpen || playlistOpen || midiOpen) return;
 
       // ---- Screen views (mirror the SETUP / AUDIO / PANEL display tabs) ----
       if (shift && kl === "a") { e.preventDefault(); setMainView("display"); setDisplayMode(m => m === "image" ? "spectrum" : m); return; } // Audio
@@ -1755,7 +1760,6 @@ function App() {
     };
 
     const up = (e) => {
-      if (editable(e.target)) return;
       const k = e.key;
       const kl = k.toLowerCase();
       const release = (key, fn) => { if (heldRef.current.has(key)) { heldRef.current.delete(key); fn(); } };
@@ -1786,7 +1790,7 @@ function App() {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
     };
-  }, [helpOpen, sirenSetupOpen, playlistOpen]);
+  }, [helpOpen, midiOpen, sirenSetupOpen, playlistOpen]);
 
   const toggleRecord = async () => {
     await init();
@@ -2664,12 +2668,32 @@ function App() {
                 <div className="td-time-sub mono">{fmtTime(state.dur)}</div>
                 <div className="td-track">
                   {state.name && state.name !== "—" ? state.name : `${label === "A" ? "1" : "2"} Empty`}
-                  <div className="td-progress" onClick={(e) => {
-                    if (!ready) return;
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const pct = (e.clientX - rect.left) / rect.width;
-                    deck().seek(pct);
-                  }}>
+                  <div className="td-progress" role="slider"
+                    tabIndex={state.dur > 0 ? 0 : -1}
+                    aria-label={`Deck ${label} playhead`}
+                    aria-valuemin={0}
+                    aria-valuemax={Math.max(0, state.dur)}
+                    aria-valuenow={Math.min(state.time, state.dur)}
+                    aria-valuetext={`${fmtTime(state.time)} of ${fmtTime(state.dur)}`}
+                    onKeyDown={(e) => {
+                      if (!ready || !state.dur) return;
+                      const step = e.shiftKey ? 30 : 5;
+                      let next = state.time;
+                      if (e.key === "ArrowRight" || e.key === "ArrowUp") next += step;
+                      else if (e.key === "ArrowLeft" || e.key === "ArrowDown") next -= step;
+                      else if (e.key === "Home") next = 0;
+                      else if (e.key === "End") next = state.dur;
+                      else return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                      deck().seek(Math.max(0, Math.min(state.dur, next)) / state.dur);
+                    }}
+                    onClick={(e) => {
+                      if (!ready) return;
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const pct = (e.clientX - rect.left) / rect.width;
+                      deck().seek(pct);
+                    }}>
                     <div className="td-progress-fill" style={{ width: state.dur ? (state.time / state.dur) * 100 + "%" : "0%" }}></div>
                   </div>
                 </div>
@@ -2819,15 +2843,16 @@ function App() {
         {/* HELP / KEYBOARD SHORTCUTS MODAL */}
         {helpOpen && ReactDOM.createPortal(
           <div className="modal-overlay" style={{ zIndex: 1400 }} onClick={() => setHelpOpen(false)}>
-            <div className="modal-window panel with-screws help-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-window panel with-screws help-modal" role="dialog" aria-modal="true"
+              aria-labelledby="help-dialog-title" onClick={(e) => e.stopPropagation()}>
               <div className="screw-bl"></div><div className="screw-br"></div>
               <div className="modal-titlebar">
                 <span className="modal-traffic">
-                  <span className="dot red" onClick={() => setHelpOpen(false)}></span>
-                  <span className="dot yellow"></span>
-                  <span className="dot green"></span>
+                  <button type="button" className="dot red" aria-label="Close help" onClick={() => setHelpOpen(false)}></button>
+                  <span className="dot yellow" aria-hidden="true"></span>
+                  <span className="dot green" aria-hidden="true"></span>
                 </span>
-                <span className="panel-title" style={{ flex: 1, textAlign: "center" }}>Help · Keyboard & Launchpads</span>
+                <span id="help-dialog-title" className="panel-title" style={{ flex: 1, textAlign: "center" }}>Help · Keyboard & Launchpads</span>
                 <button className="btn-xs btn" onClick={() => setHelpOpen(false)}>ESC</button>
               </div>
               <div className="panel-body help-body">
@@ -2863,14 +2888,15 @@ function App() {
         {/* MIDI MAPPING MODAL */}
         {midiOpen && ReactDOM.createPortal(
           <div className="modal-overlay" style={{ zIndex: 1400 }} onClick={() => { setMidiOpen(false); setMidiLearnId(null); mapperRef.current && mapperRef.current.cancelLearn(); }}>
-            <div className="modal-window panel with-screws" style={{ maxWidth: 560, width: "90%" }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-window panel with-screws" role="dialog" aria-modal="true"
+              aria-labelledby="midi-dialog-title" style={{ maxWidth: 560, width: "90%" }} onClick={(e) => e.stopPropagation()}>
               <div className="screw-bl"></div><div className="screw-br"></div>
               <div className="modal-titlebar">
                 <span className="modal-traffic">
-                  <span className="dot red" onClick={() => setMidiOpen(false)}></span>
-                  <span className="dot yellow"></span><span className="dot green"></span>
+                  <button type="button" className="dot red" aria-label="Close MIDI mapping" onClick={() => setMidiOpen(false)}></button>
+                  <span className="dot yellow" aria-hidden="true"></span><span className="dot green" aria-hidden="true"></span>
                 </span>
-                <span className="panel-title" style={{ flex: 1, textAlign: "center" }}>MIDI Mapping</span>
+                <span id="midi-dialog-title" className="panel-title" style={{ flex: 1, textAlign: "center" }}>MIDI Mapping</span>
                 <button className="btn-xs btn" onClick={() => setMidiOpen(false)}>ESC</button>
               </div>
               <div className="panel-body" style={{ maxHeight: "70vh", overflowY: "auto", padding: 12 }}>

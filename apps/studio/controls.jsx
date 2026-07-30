@@ -66,6 +66,7 @@ function handleSliderKey(event, value, min, max, onChange) {
       return;
   }
   event.preventDefault();
+  event.stopPropagation();
   onChange(clamp(next, min, max));
 }
 

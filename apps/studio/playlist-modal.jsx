@@ -486,7 +486,8 @@ function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, canRep
   const otherCount = (isA ? eng.deckB : eng.deckA)?.playlist?.length || 0;
 
   return ReactDOM.createPortal(
-      <div className="floating-window panel with-screws playlist-modal"
+      <div className="floating-window panel with-screws playlist-modal" role="dialog"
+        aria-label={`Deck ${label} playlist`}
         style={fb.style}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
@@ -496,9 +497,9 @@ function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, canRep
 
         <div className="modal-titlebar floating-titlebar" style={{ cursor: "move", touchAction: "none" }} onPointerDown={fb.startDrag}>
           <span className="modal-traffic">
-            <span className="dot red" onClick={onClose}></span>
-            <span className="dot yellow"></span>
-            <span className="dot green"></span>
+            <button type="button" className="dot red" aria-label="Close playlist" onClick={onClose}></button>
+            <span className="dot yellow" aria-hidden="true"></span>
+            <span className="dot green" aria-hidden="true"></span>
           </span>
           <span className="panel-title">Playlist</span>
 
@@ -601,7 +602,10 @@ function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, canRep
                     onChange={(e) => setSaveName(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") confirmSave();
-                      if (e.key === "Escape") cancelSave();
+                      if (e.key === "Escape") {
+                        e.stopPropagation();
+                        cancelSave();
+                      }
                     }}
                     autoFocus
                     placeholder={defaultSaveName()}

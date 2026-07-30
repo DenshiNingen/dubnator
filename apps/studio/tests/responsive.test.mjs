@@ -61,6 +61,9 @@ test("custom touch controls cancel safely and expose keyboard slider semantics",
   assert.match(app, /className="setup-tabs" role="tablist"/);
   assert.match(app, /aria-label="Music reverb send" aria-pressed=/);
   assert.match(app, /role="button" tabIndex=\{0\}/);
+  assert.match(app, /aria-label=\{`Deck \$\{label\} playhead`\}/);
+  assert.match(controls, /event\.stopPropagation\(\)/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
 });
 
 test("visual feedback work pauses or throttles when it cannot help the user", () => {

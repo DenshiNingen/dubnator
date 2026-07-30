@@ -118,3 +118,9 @@ test("siren preset moved to keys 2 and 3", () => {
   assert.ok(/k === "2".*stepSirenPreset\(s, -1\)/.test(DOWN), "key 2 should step siren preset down");
   assert.ok(/k === "3".*stepSirenPreset\(s, \+1\)/.test(DOWN), "key 3 should step siren preset up");
 });
+
+test("global performance shortcuts ignore focused controls and open tools", () => {
+  assert.match(SRC, /closest\?\.\("input, textarea, select, button, \[role='slider'\]/);
+  assert.match(SRC, /if \(helpOpen \|\| sirenSetupOpen \|\| playlistOpen \|\| midiOpen\) return/);
+  assert.match(SRC, /if \(midiOpen\) \{ setMidiOpen\(false\); return; \}/);
+});
