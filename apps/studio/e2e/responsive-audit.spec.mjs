@@ -38,14 +38,18 @@ test("keeps every rack region inside the page viewport", async ({ page }, testIn
           width: Math.round(rect.width),
         };
       });
-    const touchTargets = [...document.querySelectorAll("button, select, input, label")]
+    const touchTargets = [...document.querySelectorAll(
+      "button, select, input, label, [role='button'], [role='slider'], [role='radio'], [role='tab']",
+    )]
       .filter(visible)
       .map((element) => {
         const rect = element.getBoundingClientRect();
+        const verticalHitSlop = element.matches(".fader-track, .vslider-track") ? 20 : 0;
+        const horizontalHitSlop = element.matches(".xfader") ? 16 : 0;
         return {
           name: element.getAttribute("aria-label") || element.getAttribute("title") || element.textContent.trim().slice(0, 24),
-          width: Math.round(rect.width),
-          height: Math.round(rect.height),
+          width: Math.round(rect.width + verticalHitSlop),
+          height: Math.round(rect.height + horizontalHitSlop),
         };
       });
 
@@ -197,4 +201,20 @@ test("an interrupted touch drag releases its rack control", async ({ page }, tes
     }));
   }, point);
   await expect.poll(async () => Number(await echoSend.getAttribute("aria-valuenow"))).toBe(releasedAt);
+
+  const geqFader = page.locator(".rack-geq .vslider-track").first();
+  await geqFader.scrollIntoViewIfNeeded();
+  const faderBox = await geqFader.boundingBox();
+  expect(faderBox).not.toBeNull();
+  const hitSlopPoint = {
+    x: faderBox.x + faderBox.width + 8,
+    y: faderBox.y + faderBox.height * 0.25,
+  };
+  const hitTarget = await page.evaluate(({ x, y }) => {
+    const element = document.elementFromPoint(x, y);
+    return element?.classList.contains("vslider-track") || false;
+  }, hitSlopPoint);
+  expect(hitTarget).toBe(true);
+  await page.touchscreen.tap(hitSlopPoint.x, hitSlopPoint.y);
+  await expect.poll(async () => Number(await geqFader.getAttribute("aria-valuenow"))).toBeGreaterThan(0);
 });

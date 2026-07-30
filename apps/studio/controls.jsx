@@ -490,8 +490,19 @@ function SpectrumAnalyser({ engine, mode = "log", height = 130, color = "var(--a
     if (!c) return;
     const ctx = c.getContext("2d");
     const dpr = window.devicePixelRatio || 1;
-    let raf;
+    let raf = 0;
+    let inViewport = true;
+    let pageVisible = !document.hidden;
+    const stop = () => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+    };
+    const schedule = () => {
+      if (running && inViewport && pageVisible && !raf) raf = requestAnimationFrame(draw);
+    };
     const draw = () => {
+      raf = 0;
+      if (!running || !inViewport || !pageVisible) return;
       const w = c.clientWidth, h = c.clientHeight;
       if (c.width !== w * dpr || c.height !== h * dpr) {
         c.width = w * dpr; c.height = h * dpr;
@@ -573,10 +584,28 @@ function SpectrumAnalyser({ engine, mode = "log", height = 130, color = "var(--a
         const lbl = f >= 1000 ? `${f / 1000}k` : `${f}`;
         ctx.fillText(lbl, x + 2, h - 6);
       }
-      raf = requestAnimationFrame(draw);
+      schedule();
     };
-    if (running) draw();
-    return () => cancelAnimationFrame(raf);
+    const observer = typeof IntersectionObserver === "undefined"
+      ? null
+      : new IntersectionObserver(([entry]) => {
+          inViewport = entry.isIntersecting;
+          if (inViewport) schedule();
+          else stop();
+        }, { rootMargin: "100px" });
+    observer?.observe(c);
+    const onVisibilityChange = () => {
+      pageVisible = !document.hidden;
+      if (pageVisible) schedule();
+      else stop();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    schedule();
+    return () => {
+      stop();
+      observer?.disconnect();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, [engine, mode, running, height, color, source]);
   return <canvas ref={canvasRef} style={{ width: "100%", height, display: "block" }} />;
 }

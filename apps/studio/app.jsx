@@ -6,6 +6,7 @@ const ECHO_DIVS = ["1/4", "1/4.", "1/4t", "1/8", "1/8.", "1/8t", "1/16", "1/16t"
 const DECK_END_MODES = ["stop", "loop", "next"];
 const LAUNCHPAD_BRIGHTNESS_LEVELS = [0, 18, 36, 54, 73, 91, 109, 127];
 const LAUNCHPAD_BRIGHTNESS_KEY = "dubnator.launchpad.brightness.v1";
+const METER_FRAME_MS = 1000 / 30;
 const deckEndModeFromValue = (value) => value < 0.25 ? "stop" : value < 0.75 ? "loop" : "next";
 const deckEndModeValue = (mode) => mode === "next" ? 1 : mode === "loop" ? 0.5 : 0;
 // A restrained performance starting point: tempo-related repeats, less low-end
@@ -757,10 +758,14 @@ function App() {
   useEffect(() => {
     if (!ready) return;
     let raf;
+    let lastFrame = 0;
     const dataA = new Uint8Array(eng.deckA.analyser.fftSize);
     const dataB = new Uint8Array(eng.deckB.analyser.fftSize);
     const dataM = new Uint8Array(eng.masterAnalyser.fftSize);
-    const tick = () => {
+    const tick = (now) => {
+      raf = requestAnimationFrame(tick);
+      if (document.hidden || now - lastFrame < METER_FRAME_MS) return;
+      lastFrame = now;
       eng.deckA.analyser.getByteTimeDomainData(dataA);
       eng.deckB.analyser.getByteTimeDomainData(dataB);
       eng.masterAnalyser.getByteTimeDomainData(dataM);
@@ -801,9 +806,8 @@ function App() {
       // deck times
       setDeckA((s) => ({ ...s, time: eng.deckA.getCurrentTime(), dur: eng.deckA.getDuration(), name: eng.deckA.name, playing: eng.deckA.playing, cued: eng.deckA.hasCue() }));
       setDeckB((s) => ({ ...s, time: eng.deckB.getCurrentTime(), dur: eng.deckB.getDuration(), name: eng.deckB.name, playing: eng.deckB.playing, cued: eng.deckB.hasCue() }));
-      raf = requestAnimationFrame(tick);
     };
-    tick();
+    raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [ready]);
 
@@ -2349,13 +2353,15 @@ function App() {
               </div>
               <div className="section-send-row">
                 <div className="send-stack">
-                  <div className={`send-btn-lg accent ${musicSends.rev ? "on" : ""}`}
-                    onClick={() => setMusicSends(s => ({ ...s, rev: !s.rev }))}></div>
+                  <button type="button" className={`send-btn-lg accent ${musicSends.rev ? "on" : ""}`}
+                    aria-label="Music reverb send" aria-pressed={musicSends.rev}
+                    onClick={() => setMusicSends(s => ({ ...s, rev: !s.rev }))}></button>
                   <span className="lbl">REV</span>
                 </div>
                 <div className="send-stack">
-                  <div className={`send-btn-lg ${musicSends.echo ? "on" : ""}`}
-                    onClick={() => setMusicSends(s => ({ ...s, echo: !s.echo }))}></div>
+                  <button type="button" className={`send-btn-lg ${musicSends.echo ? "on" : ""}`}
+                    aria-label="Music echo send" aria-pressed={musicSends.echo}
+                    onClick={() => setMusicSends(s => ({ ...s, echo: !s.echo }))}></button>
                   <span className="lbl">ECHO</span>
                 </div>
               </div>
@@ -2394,16 +2400,18 @@ function App() {
               </div>
               <div className="section-send-row">
                 <div className="send-stack">
-                  <div className={`send-btn-lg ${auxSends.rev ? "on" : ""}`}
-                    onClick={() => setAuxSends(s => ({ ...s, rev: !s.rev }))}></div>
+                  <button type="button" className={`send-btn-lg ${auxSends.rev ? "on" : ""}`}
+                    aria-label="Aux reverb send" aria-pressed={auxSends.rev}
+                    onClick={() => setAuxSends(s => ({ ...s, rev: !s.rev }))}></button>
                   <span className="lbl">REV</span>
                   <Knob size="sm" midiId="aux.revlevel" value={auxLevels.rev} min={0} max={1}
                     onChange={(v) => setAuxLevels(s => ({ ...s, rev: v }))}
                     format={(v) => (v * 100).toFixed(0) + "%"} />
                 </div>
                 <div className="send-stack">
-                  <div className={`send-btn-lg ${auxSends.echo ? "on" : ""}`}
-                    onClick={() => setAuxSends(s => ({ ...s, echo: !s.echo }))}></div>
+                  <button type="button" className={`send-btn-lg ${auxSends.echo ? "on" : ""}`}
+                    aria-label="Aux echo send" aria-pressed={auxSends.echo}
+                    onClick={() => setAuxSends(s => ({ ...s, echo: !s.echo }))}></button>
                   <span className="lbl">ECHO</span>
                   <Knob size="sm" midiId="aux.echolevel" value={auxLevels.echo} min={0} max={1}
                     onChange={(v) => setAuxLevels(s => ({ ...s, echo: v }))}
@@ -2419,38 +2427,43 @@ function App() {
           <div className="screw-bl"></div><div className="screw-br"></div>
           <div className="panel-body" style={{ padding: 8 }}>
             <div className="setup-col">
-              <div className="setup-tabs">
-                <div className={`setup-tab ${mainView === "display" && displayMode === "image" ? "active" : ""}`}
-                  onClick={() => { setMainView("display"); setDisplayMode("image"); }}>SETUP</div>
-                <div className={`setup-tab ${mainView === "display" && displayMode !== "image" ? "active" : ""}`}
-                  onClick={() => { setMainView("display"); setDisplayMode(m => m === "image" ? "spectrum" : m); }}>AUDIO</div>
-                <div className={`setup-tab ${mainView === "panel" ? "active" : ""}`}
-                  onClick={() => setMainView("panel")}>PANEL</div>
+              <div className="setup-tabs" role="tablist" aria-label="Main display">
+                <button type="button" role="tab" aria-selected={mainView === "display" && displayMode === "image"}
+                  className={`setup-tab ${mainView === "display" && displayMode === "image" ? "active" : ""}`}
+                  onClick={() => { setMainView("display"); setDisplayMode("image"); }}>SETUP</button>
+                <button type="button" role="tab" aria-selected={mainView === "display" && displayMode !== "image"}
+                  className={`setup-tab ${mainView === "display" && displayMode !== "image" ? "active" : ""}`}
+                  onClick={() => { setMainView("display"); setDisplayMode(m => m === "image" ? "spectrum" : m); }}>AUDIO</button>
+                <button type="button" role="tab" aria-selected={mainView === "panel"}
+                  className={`setup-tab ${mainView === "panel" ? "active" : ""}`}
+                  onClick={() => setMainView("panel")}>PANEL</button>
               </div>
               <div className="setup-divider"></div>
               <div className="section-label" style={{ marginTop: 4 }}>EQ SELECT</div>
-              <div className="col gap-1">
+              <div className="col gap-1" role="radiogroup" aria-label="EQ processing">
                 {["KILLS ONLY", "10B EQ", "4B EQ", "ALL EQS"].map((o) => (
-                  <div key={o} className="radio-row" onClick={() => setEqSelect(o)}>
+                  <button type="button" role="radio" aria-checked={eqSelect === o}
+                    key={o} className="radio-row" onClick={() => setEqSelect(o)}>
                     <span className={`radio-dot ${eqSelect === o ? "on" : ""}`}></span>
                     <span className="radio-label" style={{ fontSize: 8 }}>{o}</span>
-                  </div>
+                  </button>
                 ))}
               </div>
               <div className="setup-divider" style={{ marginTop: 4 }}></div>
               <div className="section-label">DUBFILTER</div>
-              <div className="col gap-1">
+              <div className="col gap-1" role="radiogroup" aria-label="Dub filter route">
                 {[
                   { v: "music", lbl: "A · MUSIC" },
                   { v: "master", lbl: "B · MASTER" },
                   { v: "samples", lbl: "C · SAMPLES" },
                   { v: "off", lbl: "D · OFF" },
                 ].map(o => (
-                  <div key={o.v} className="radio-row"
+                  <button type="button" role="radio" aria-checked={dubFilter.route === o.v}
+                    key={o.v} className="radio-row"
                     onClick={() => setDubFilter(s => ({ ...s, route: o.v, on: o.v !== "off" }))}>
                     <span className={`radio-dot ${dubFilter.route === o.v ? "on" : ""}`}></span>
                     <span className="radio-label" style={{ fontSize: 8 }}>{o.lbl}</span>
-                  </div>
+                  </button>
                 ))}
               </div>
               <div className="row gap-1" style={{ marginTop: 6 }}>
@@ -2478,11 +2491,12 @@ function App() {
                   format={(v) => v.toFixed(2) + "Hz"} />
               </div>
               <div className="setup-divider" style={{ marginTop: 4 }}></div>
-              <div className="section-label section-label-toggle" onClick={() => setViewOpen(o => !o)}
+              <button type="button" className="section-label section-label-toggle"
+                aria-expanded={viewOpen} onClick={() => setViewOpen(o => !o)}
                 title="Display tint controls">
                 VIEW <span className="sl-chevron">{viewOpen ? "▴" : "▾"}</span>
                 {!viewOpen && (view.hue || view.darkness) ? <span className="sl-dot"></span> : null}
-              </div>
+              </button>
               {viewOpen && (<>
               <div className="view-row">
                 <span className="view-lbl mono">HUE</span>
@@ -2715,11 +2729,11 @@ function App() {
                 <div className="section-label">Preset</div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 4 }}>
                   {(eng.siren ? eng.siren.presets() : []).map((p, i) => (
-                    <div key={i}
+                    <button type="button" key={i} aria-pressed={siren.preset === i}
                       className={`preset-cell ${siren.preset === i ? "active" : ""}`}
                       onClick={() => {
                         setSiren(s => ({ ...s, preset: i, pitch: p.pitch, lfo1Rate: p.lfo1Rate, lfo1Depth: p.lfo1Depth, lfo2Rate: p.lfo2Rate, lfo2Depth: p.lfo2Depth }));
-                      }}>{p.name || `FX ${i + 1}`}</div>
+                      }}>{p.name || `FX ${i + 1}`}</button>
                   ))}
                 </div>
                 <div className="row gap-3" style={{ justifyContent: "center", marginTop: 4 }}>
@@ -3325,11 +3339,22 @@ function App() {
                   { name: "MediumRate.mp3" }, { name: "PowerUp.mp3" }, { name: "NoiseSweep.mp3" },
                   { name: "RadioSignal.mp3" }, { name: "SlowRate.mp3" }, { name: "SwitchOff.mp3" },
                 ]).map((s, i) => (
-                  <div key={i}
+                  <div key={i} role="button" tabIndex={0}
+                    aria-label={`Trigger sample ${i + 1}: ${s.name || "empty"}`}
+                    aria-pressed={selectedSample === i}
                     className={`trigger-row ${flashIdx === i ? "flash" : ""} ${selectedSample === i ? "selected" : ""} ${sampleDropIdx === i ? "sample-drop" : ""}`}
                     onPointerDown={async () => { await triggerSample(i); }}
                     onPointerUp={() => releaseSample(i)}
                     onPointerLeave={() => releaseSample(i)}
+                    onKeyDown={(event) => {
+                      if ((event.key === " " || event.key === "Enter") && !event.repeat) {
+                        event.preventDefault();
+                        triggerSample(i);
+                      }
+                    }}
+                    onKeyUp={(event) => {
+                      if (event.key === " " || event.key === "Enter") releaseSample(i);
+                    }}
                     onDragOver={(e) => { e.preventDefault(); setSampleDropIdx(i); }}
                     onDragLeave={(e) => { if (e.currentTarget === e.target) setSampleDropIdx(null); }}
                     onDrop={onSampleDrop(i)}

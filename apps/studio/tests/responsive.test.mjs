@@ -55,6 +55,21 @@ test("custom touch controls cancel safely and expose keyboard slider semantics",
   assert.ok((controls.match(/role="slider"/g) || []).length >= 4);
   assert.ok((controls.match(/tabIndex=\{0\}/g) || []).length >= 4);
   assert.match(css, /\.knob:focus-visible,[\s\S]*?outline: 2px solid var\(--accent\)/);
+  assert.match(css, /\.fader-track::before,[\s\S]*?inset: 0 -10px/);
+  assert.match(css, /\.xfader::before\s*\{[\s\S]*?inset: -8px 0/);
+  assert.match(app, /className="setup-tabs" role="tablist"/);
+  assert.match(app, /aria-label="Music reverb send" aria-pressed=/);
+  assert.match(app, /role="button" tabIndex=\{0\}/);
+});
+
+test("visual feedback work pauses or throttles when it cannot help the user", () => {
+  assert.match(app, /const METER_FRAME_MS = 1000 \/ 30/);
+  assert.match(app, /document\.hidden \|\| now - lastFrame < METER_FRAME_MS/);
+  assert.match(controls, /new IntersectionObserver/);
+  assert.match(controls, /document\.addEventListener\("visibilitychange"/);
+  assert.match(controls, /observer\?\.disconnect\(\)/);
+  assert.match(bootstrap, /observer\.disconnect\(\)/);
+  assert.doesNotMatch(bootstrap, /setInterval/);
 });
 
 test("labels every main rack region for stable responsive placement", () => {

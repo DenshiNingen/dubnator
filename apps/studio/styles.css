@@ -680,7 +680,15 @@ input.midi-learning { animation: midiLearnPulse 0.6s ease-in-out infinite; }
 }
 
 /* Section label inside panels */
-.section-label-toggle { cursor: pointer; }
+.section-label-toggle {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
 .section-label-toggle .sl-chevron { color: var(--text-faint, #666); font-size: 8px; }
 .section-label-toggle .sl-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 4px var(--accent); display: inline-block; }
 .section-label {
@@ -800,7 +808,13 @@ input.midi-learning { animation: midiLearnPulse 0.6s ease-in-out infinite; }
 /* checkbox-like radio */
 .radio-row {
   display: flex; align-items: center; gap: 6px;
+  width: 100%;
   padding: 1px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
   cursor: pointer;
 }
 .radio-dot {
@@ -1033,6 +1047,7 @@ input.midi-learning { animation: midiLearnPulse 0.6s ease-in-out infinite; }
   gap: 4px;
 }
 .preset-cell {
+  width: 100%;
   background: #0a0a0a;
   border: 1px solid #000;
   padding: 4px 6px;
@@ -1040,6 +1055,7 @@ input.midi-learning { animation: midiLearnPulse 0.6s ease-in-out infinite; }
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-dim);
+  font-family: inherit;
   cursor: pointer;
   text-align: center;
 }
@@ -1290,6 +1306,7 @@ input.midi-learning { animation: midiLearnPulse 0.6s ease-in-out infinite; }
 .send-btn-lg {
   width: 32px;
   height: 32px;
+  padding: 0;
   flex: none;
   border-radius: 50%;
   background: radial-gradient(circle at 35% 30%, #2c2c2c 0%, #0c0c0c 100%);
@@ -1402,6 +1419,9 @@ input.midi-learning { animation: midiLearnPulse 0.6s ease-in-out infinite; }
 .setup-tab {
   flex: 1;
   padding: 3px 2px;
+  border: 0;
+  border-right: 1px solid #000;
+  font-family: inherit;
   font-size: 7px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -3569,6 +3589,18 @@ input[type="range"]:disabled { opacity: 0.35; }
     height: 34px;
   }
 
+  .setup-tab,
+  .radio-row,
+  .section-label-toggle,
+  .trigger-row,
+  .preset-cell {
+    min-height: 34px;
+  }
+
+  .td-track {
+    height: 34px;
+  }
+
   .transport-btn {
     width: 29px;
     height: 30px;
@@ -3588,6 +3620,19 @@ input[type="range"]:disabled { opacity: 0.35; }
   .xfader,
   input[type="range"] {
     touch-action: none;
+  }
+
+  .fader-track::before,
+  .vslider-track::before {
+    content: "";
+    position: absolute;
+    inset: 0 -10px;
+  }
+
+  .xfader::before {
+    content: "";
+    position: absolute;
+    inset: -8px 0;
   }
 
   .knob.sm {
@@ -3614,6 +3659,15 @@ input[type="range"]:disabled { opacity: 0.35; }
     width: 22px;
     height: 24px;
   }
+}
+
+.setup-tab:focus-visible,
+.radio-row:focus-visible,
+.section-label-toggle:focus-visible,
+.preset-cell:focus-visible,
+.trigger-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .pl-deck-tabs {

@@ -4,17 +4,23 @@
 (function () {
   function fitChassis() {
     const chassis = document.querySelector(".chassis");
-    if (!chassis) return;
+    if (!chassis) return false;
     chassis.style.transformOrigin = "top center";
     chassis.style.transform = "none";
     chassis.style.marginBottom = "0";
     document.body.style.height = "";
+    return true;
   }
 
   window.addEventListener("resize", fitChassis);
-  new MutationObserver(fitChassis).observe(document.body, {
-    childList: true,
-    subtree: true,
-  });
-  window.setInterval(fitChassis, 500);
+  if (!fitChassis()) {
+    const observer = new MutationObserver(() => {
+      if (!fitChassis()) return;
+      observer.disconnect();
+    });
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+  }
 })();
