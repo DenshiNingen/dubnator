@@ -611,4 +611,240 @@ function SpectrumAnalyser({ engine, mode = "log", height = 130, color = "var(--a
   return <canvas ref={canvasRef} style={{ width: "100%", height, display: "block" }} />;
 }
 
-Object.assign(window, { Knob, VSlider, Meter, EQCurve, LED, Crossfader, Fader, SpectrumAnalyser, InteractiveFilterGraph });
+// ============ DECK WAVEFORM ============
+// The expensive buffer scan only reruns when a deck loads a different
+// AudioBuffer. Playhead, cue and loop overlays remain cheap CSS updates.
+function DeckWaveform({
+  engineDeck,
+  state,
+  bpm = 120,
+  label,
+  windowSeconds = 0,
+  onZoom = null,
+  showTempo = true,
+}) {
+  const duration = state.dur || engineDeck?.getDuration?.() || 0;
+  const buffer = engineDeck?.buffer || null;
+  const gridBpm = state.analysis?.bpm || bpm;
+  const approximateTempo = state.analysis?.tempoSource === "audio";
+  const gradientId = React.useId().replace(/:/g, "");
+  const paths = React.useMemo(() => {
+    if (!buffer || !buffer.length) {
+      return { body: "", core: "", outline: "", beats: "", bars: "" };
+    }
+    // Keep enough horizontal detail for a CDJ-style close zoom. A fixed
+    // 360-column overview becomes a handful of crude bars when a long track is
+    // viewed in a 2–4 second window; duration-scaled sampling stays detailed.
+    const columns = Math.min(6000, Math.max(720, Math.ceil(buffer.duration * 28)));
+    const channel = buffer.getChannelData(0);
+    const peaks = new Float32Array(columns);
+    const rmsLevels = new Float32Array(columns);
+    for (let column = 0; column < columns; column++) {
+      const start = Math.floor((column / columns) * channel.length);
+      const end = Math.max(start + 1, Math.floor(((column + 1) / columns) * channel.length));
+      const stride = Math.max(1, Math.floor((end - start) / 72));
+      let peak = 0;
+      let squares = 0;
+      let samples = 0;
+      for (let sample = start; sample < end; sample += stride) {
+        const value = channel[sample] || 0;
+        peak = Math.max(peak, Math.abs(value));
+        squares += value * value;
+        samples++;
+      }
+      peaks[column] = peak;
+      rmsLevels[column] = samples ? Math.sqrt(squares / samples) : 0;
+    }
+
+    // Percentile normalization stops one rogue transient from making the rest
+    // of the track look flat. The peak envelope retains transients while the
+    // RMS core gives the waveform a solid, readable body.
+    const percentile = (values, ratio) => {
+      const sorted = Array.from(values).sort((a, b) => a - b);
+      return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * ratio))] || 0;
+    };
+    const peakScale = 42 / Math.max(0.0001, percentile(peaks, 0.985));
+    const rmsScale = 28 / Math.max(0.0001, percentile(rmsLevels, 0.96));
+    const body = new Float32Array(columns);
+    const core = new Float32Array(columns);
+    for (let column = 0; column < columns; column++) {
+      const previous = peaks[Math.max(0, column - 1)];
+      const next = peaks[Math.min(columns - 1, column + 1)];
+      const localPeak = Math.max(
+        peaks[column] * 0.88,
+        (previous + peaks[column] * 2 + next) * 0.25,
+      );
+      body[column] = Math.max(0.9, Math.min(47, localPeak * peakScale));
+      core[column] = Math.max(
+        0.55,
+        Math.min(body[column] * 0.88, rmsLevels[column] * rmsScale),
+      );
+    }
+
+    const areaPath = (amplitudes) => {
+      let path = "";
+      for (let column = 0; column < columns; column++) {
+        const x = (column / (columns - 1)) * 1000;
+        const y = 50 - amplitudes[column];
+        path += `${column ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)}`;
+      }
+      for (let column = columns - 1; column >= 0; column--) {
+        const x = (column / (columns - 1)) * 1000;
+        const y = 50 + amplitudes[column];
+        path += `L${x.toFixed(2)} ${y.toFixed(2)}`;
+      }
+      return `${path}Z`;
+    };
+    let outline = "";
+    for (let column = 0; column < columns; column++) {
+      const x = (column / (columns - 1)) * 1000;
+      outline += `${column ? "L" : "M"}${x.toFixed(2)} ${(50 - body[column]).toFixed(2)}`;
+    }
+    for (let column = columns - 1; column >= 0; column--) {
+      const x = (column / (columns - 1)) * 1000;
+      outline += `${column === columns - 1 ? "M" : "L"}${x.toFixed(2)} ${(50 + body[column]).toFixed(2)}`;
+    }
+
+    const beatSeconds = 60 / Math.max(20, Math.min(400, gridBpm || 120));
+    const totalBeats = Math.floor(buffer.duration / beatSeconds);
+    const beatStride = Math.max(1, Math.ceil(totalBeats / 480));
+    let beats = "";
+    let bars = "";
+    for (let beat = 0; beat <= totalBeats; beat += beatStride) {
+      const x = ((beat * beatSeconds) / buffer.duration) * 1000;
+      const segment = `M${x.toFixed(2)} 0V100`;
+      if (beat % 4 === 0) bars += segment;
+      else beats += segment;
+    }
+    return {
+      body: areaPath(body),
+      core: areaPath(core),
+      outline,
+      beats,
+      bars,
+    };
+  }, [buffer, gridBpm]);
+
+  const visibleDuration = windowSeconds > 0 && duration > 0
+    ? Math.min(duration, windowSeconds)
+    : duration;
+  const viewStart = visibleDuration > 0 && visibleDuration < duration
+    ? Math.min(
+      Math.max(0, (state.time || 0) - visibleDuration * 0.35),
+      duration - visibleDuration,
+    )
+    : 0;
+  const viewEnd = visibleDuration > 0 ? viewStart + visibleDuration : duration;
+  const viewSpan = Math.max(0.001, viewEnd - viewStart || duration || 1);
+  const seekAt = (clientX, element) => {
+    if (!duration || !engineDeck?.seek) return;
+    const rect = element.getBoundingClientRect();
+    const fraction = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    engineDeck.seek(Math.max(0, Math.min(1, (viewStart + fraction * viewSpan) / duration)));
+  };
+  const onPointerDown = (event) => {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    seekAt(event.clientX, event.currentTarget);
+  };
+  const onPointerMove = (event) => {
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      seekAt(event.clientX, event.currentTarget);
+    }
+  };
+  const onKeyDown = (event) => {
+    if (!duration || !engineDeck?.seek) return;
+    const step = event.shiftKey ? 30 : 5;
+    let next = state.time || 0;
+    if (event.key === "ArrowRight" || event.key === "ArrowUp") next += step;
+    else if (event.key === "ArrowLeft" || event.key === "ArrowDown") next -= step;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = duration;
+    else return;
+    event.preventDefault();
+    event.stopPropagation();
+    engineDeck.seek(Math.max(0, Math.min(duration, next)) / duration);
+  };
+  const onWheel = (event) => {
+    if (!onZoom) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onZoom(event.deltaY);
+  };
+
+  const pct = (seconds) => duration
+    ? `${Math.max(0, Math.min(100, ((seconds - viewStart) / viewSpan) * 100))}%`
+    : "0%";
+  const waveTime = (seconds) => {
+    const safe = Math.max(0, seconds || 0);
+    return `${Math.floor(safe / 60)}:${String(Math.floor(safe % 60)).padStart(2, "0")}`;
+  };
+  const cue = engineDeck?.cuePoint;
+  const loopA = engineDeck?.loopA || 0;
+  const loopB = engineDeck?.loopB || 0;
+  const visibleLoopA = Math.max(loopA, viewStart);
+  const visibleLoopB = Math.min(loopB, viewEnd);
+  const loopActive = duration > 0 && loopB > loopA && visibleLoopB > visibleLoopA;
+  const cueVisible = cue != null && cue >= viewStart && cue <= viewEnd;
+  const viewBoxStart = duration > 0 ? (viewStart / duration) * 1000 : 0;
+  const viewBoxWidth = duration > 0 ? Math.max(0.001, (viewSpan / duration) * 1000) : 1000;
+  const tempoLabel = state.analysis?.bpm
+    ? `${approximateTempo ? "≈" : ""}${Math.round(state.analysis.bpm)} BPM`
+    : `GRID ${Math.round(bpm)}`;
+
+  return (
+    <div className={`td-progress deck-waveform deck-waveform-${label.toLowerCase()}`}
+      role="slider"
+      tabIndex={duration > 0 ? 0 : -1}
+      aria-label={`Deck ${label} ${windowSeconds > 0 ? "detailed " : ""}waveform playhead`}
+      aria-valuemin={0}
+      aria-valuemax={Math.max(0, duration)}
+      aria-valuenow={Math.min(state.time || 0, duration)}
+      aria-valuetext={`${waveTime(state.time)} of ${waveTime(duration)}`}
+      title={`Seek Deck ${label} · ${approximateTempo ? "estimated " : ""}beat grid ${Math.round(gridBpm)} BPM${state.analysis?.key ? ` · estimated ${state.analysis.key}` : ""}`}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onWheel={onWheel}
+      onKeyDown={onKeyDown}>
+      <svg className="deck-waveform-svg"
+        viewBox={`${viewBoxStart} 0 ${viewBoxWidth} 100`}
+        preserveAspectRatio="none" aria-hidden="true">
+        <defs>
+          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="white" stopOpacity="0.78" />
+            <stop offset="12%" stopColor="var(--deck-wave)" stopOpacity="0.96" />
+            <stop offset="50%" stopColor="var(--deck-wave)" stopOpacity="0.48" />
+            <stop offset="88%" stopColor="var(--deck-wave)" stopOpacity="0.96" />
+            <stop offset="100%" stopColor="white" stopOpacity="0.78" />
+          </linearGradient>
+        </defs>
+        <path className="deck-waveform-beats" d={paths.beats} />
+        <path className="deck-waveform-bars" d={paths.bars} />
+        <path className="deck-waveform-body" d={paths.body} fill={`url(#${gradientId})`} />
+        <path className="deck-waveform-core" d={paths.core} />
+        <path className="deck-waveform-outline" d={paths.outline} />
+        <path className="deck-waveform-center" d="M0 50H1000" />
+      </svg>
+      {loopActive && (
+        <span className="deck-waveform-loop"
+          style={{
+            left: pct(visibleLoopA),
+            width: `${Math.max(0, Math.min(100, ((visibleLoopB - visibleLoopA) / viewSpan) * 100))}%`,
+          }} aria-hidden="true" />
+      )}
+      {cueVisible && (
+        <span className="deck-waveform-marker deck-waveform-cue"
+          style={{ left: pct(cue) }} aria-hidden="true"><i>C</i></span>
+      )}
+      <span className="deck-waveform-marker deck-waveform-playhead"
+        style={{ left: pct(state.time || 0) }} aria-hidden="true" />
+      {showTempo && (
+        <span className="deck-waveform-tempo mono" aria-hidden="true">
+          {tempoLabel}{state.analysis?.key ? ` · ~${state.analysis.key}` : ""}
+        </span>
+      )}
+    </div>
+  );
+}
+
+Object.assign(window, { Knob, VSlider, Meter, EQCurve, LED, Crossfader, Fader, SpectrumAnalyser, InteractiveFilterGraph, DeckWaveform });

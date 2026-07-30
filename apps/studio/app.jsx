@@ -1,4 +1,4 @@
-/* global React, ReactDOM, Knob, VSlider, Meter, EQCurve, LED, Crossfader */
+/* global React, ReactDOM, Knob, VSlider, Meter, EQCurve, LED, Crossfader, DeckWaveform */
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
 const FREQS_10 = [32, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
@@ -155,6 +155,19 @@ function CompactRackNav() {
 
 function DeckStrip({ label, state, set, meter, play, stop, onFile, deck, onPrev, onNext, onRewind, onSetCue, onJumpCue, bpm = 120, onOpenPlaylist, dropProps, dropActive, midiPrefix }) {
   const [more, setMore] = useState(false); // collapse RWD/PAN · A-G · loop controls
+  const [analyzing, setAnalyzing] = useState(false);
+  const deckBpm = state.analysis?.bpm || bpm;
+  const analyzeTrack = async () => {
+    const currentDeck = deck();
+    if (!currentDeck?.buffer || !currentDeck.analyze || analyzing) return;
+    setAnalyzing(true);
+    try {
+      const analysis = await currentDeck.analyze();
+      set((s) => ({ ...s, analysis }));
+    } finally {
+      setAnalyzing(false);
+    }
+  };
   const dbReadout = state.gain > 0.001
     ? (20 * Math.log10(state.gain)).toFixed(1) + " dB"
     : "−∞ dB";
@@ -240,6 +253,19 @@ function DeckStrip({ label, state, set, meter, play, stop, onFile, deck, onPrev,
         title="Auto-gain — boosts low-level tracks">
         A-G {state.autoGain ? "ON" : ""}
       </button>
+      <div className="deck-analysis-row">
+        <button className="btn-xs btn" onClick={analyzeTrack}
+          disabled={analyzing || !deck()?.buffer}
+          title="Estimate this track's tempo and musical key">
+          {analyzing ? "ANALYZING…" : "ANALYZE"}
+        </button>
+        <span className="deck-analysis-readout mono">
+          {state.analysis?.bpm
+            ? `${state.analysis.tempoSource === "audio" ? "≈" : ""}${state.analysis.bpm} BPM`
+            : "— BPM"}
+          <i>{state.analysis?.key ? `~${state.analysis.key}` : "—"}</i>
+        </span>
+      </div>
       {/* section loop in / out / clear */}
       <div className="row gap-1" style={{ justifyContent: "center", marginTop: 4 }}>
         <button className="btn-xs btn" style={{ flex: 1 }} title="Set loop start at the playhead"
@@ -256,8 +282,8 @@ function DeckStrip({ label, state, set, meter, play, stop, onFile, deck, onPrev,
       <div className="row gap-1" style={{ justifyContent: "center", marginTop: 2 }}>
         {[1, 2, 4].map((n) => (
           <button key={n} className="btn-xs btn" style={{ flex: 1 }}
-            title={`Loop ${n} beat${n > 1 ? "s" : ""} at ${bpm} BPM`}
-            onClick={() => { deck().setBeatLoop(bpm, n); set((s) => ({ ...s, loopOn: true })); }}>{n}♪</button>
+            title={`Loop ${n} beat${n > 1 ? "s" : ""} at ${deckBpm} BPM`}
+            onClick={() => { deck().setBeatLoop(deckBpm, n); set((s) => ({ ...s, loopOn: true })); }}>{n}♪</button>
         ))}
         <button className="btn-xs btn" style={{ flex: 1 }} title="Halve the loop length"
           onClick={() => deck().halveLoop()}>÷2</button>
@@ -266,6 +292,280 @@ function DeckStrip({ label, state, set, meter, play, stop, onFile, deck, onPrev,
       </div>
       </>)}
     </div>
+  );
+}
+
+function DeckFocusCard({
+  label,
+  state,
+  setState,
+  engineDeck,
+  bpm,
+  onPlay,
+  onStop,
+  onPrev,
+  onNext,
+  onRewind,
+  onSetCue,
+  onJumpCue,
+}) {
+  const [analyzing, setAnalyzing] = useState(false);
+  const minZoomSeconds = 2;
+  const maxZoomSeconds = 120;
+  const [zoomSeconds, setZoomSeconds] = useState(16);
+  const trackBpm = state.analysis?.bpm || bpm;
+  const clampZoom = (seconds) => Math.max(minZoomSeconds, Math.min(maxZoomSeconds, seconds));
+  const changeZoom = (input) => {
+    setZoomSeconds((current) => {
+      // Buttons move by a deliberately small 8%; wheel/trackpad deltas remain
+      // proportional so a gentle gesture makes a fine adjustment.
+      const factor = typeof input === "number"
+        ? Math.exp(Math.max(-120, Math.min(120, input)) * 0.0015)
+        : input === "out" ? 1.08 : 1 / 1.08;
+      return clampZoom(current * factor);
+    });
+  };
+  const zoomPosition = Math.log(maxZoomSeconds / zoomSeconds)
+    / Math.log(maxZoomSeconds / minZoomSeconds);
+  const setZoomPosition = (position) => {
+    const ratio = Math.max(0, Math.min(1, Number(position)));
+    setZoomSeconds(clampZoom(
+      maxZoomSeconds * Math.pow(minZoomSeconds / maxZoomSeconds, ratio),
+    ));
+  };
+  const zoomLabel = zoomSeconds < 10
+    ? `${zoomSeconds.toFixed(1)}s`
+    : `${Math.round(zoomSeconds)}s`;
+  const hasTrack = !!engineDeck?.buffer;
+  const hasPlaylistNavigation = (state.playlist?.length || 0) > 1;
+  const runAnalysis = async () => {
+    if (!engineDeck?.buffer || !engineDeck.analyze || analyzing) return;
+    setAnalyzing(true);
+    try {
+      const analysis = await engineDeck.analyze();
+      setState((current) => ({ ...current, analysis }));
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+  const setLoopIn = () => {
+    const loopIn = engineDeck?.getCurrentTime?.() || 0;
+    setState((current) => ({
+      ...current,
+      loopIn,
+      loopInArmed: true,
+      loopBeats: null,
+    }));
+  };
+  const setLoopOut = () => {
+    const loopOut = engineDeck?.getCurrentTime?.() || 0;
+    if (loopOut <= state.loopIn + 0.05) return;
+    engineDeck?.setLoopRegion?.(state.loopIn, loopOut);
+    setState((current) => ({
+      ...current,
+      loopOn: true,
+      loopInArmed: false,
+      loopBeats: null,
+    }));
+  };
+  const clearLoop = () => {
+    engineDeck?.clearLoopRegion?.();
+    setState((current) => ({
+      ...current,
+      loopOn: false,
+      loopIn: 0,
+      loopInArmed: false,
+      loopBeats: null,
+    }));
+  };
+  const setBeatLoop = (beats) => {
+    engineDeck?.setBeatLoop?.(trackBpm, beats);
+    setState((current) => ({
+      ...current,
+      loopOn: true,
+      loopInArmed: false,
+      loopBeats: beats,
+    }));
+  };
+  const resizeLoop = (direction) => {
+    if (direction === "half") engineDeck?.halveLoop?.();
+    else engineDeck?.doubleLoop?.();
+    setState((current) => ({
+      ...current,
+      loopBeats: current.loopBeats
+        ? direction === "half" ? current.loopBeats / 2 : current.loopBeats * 2
+        : null,
+    }));
+  };
+
+  return (
+    <section className={`deck-focus-card deck-focus-${label.toLowerCase()}`} aria-label={`Deck ${label}`}>
+      <header className="deck-focus-card-header">
+        <span className="deck-focus-letter mono">{label}</span>
+        <div className="deck-focus-track">
+          <strong>{state.name && state.name !== "—" ? state.name : `Deck ${label} empty`}</strong>
+          <span className="mono">
+            {state.analysis?.bpm
+              ? `${state.analysis.tempoSource === "audio" ? "≈" : ""}${state.analysis.bpm} BPM`
+              : `GRID ${Math.round(bpm)} BPM`}
+            {state.analysis?.key ? ` · ~${state.analysis.key}` : ""}
+          </span>
+        </div>
+        <button className="btn-xs btn" onClick={runAnalysis}
+          disabled={!engineDeck?.buffer || analyzing}
+          title={`Analyze Deck ${label} tempo and musical key`}>
+          {analyzing ? "ANALYZING…" : "ANALYZE"}
+        </button>
+      </header>
+
+      <div className="deck-focus-clock mono">
+        <strong>{fmtTime(state.time)}</strong>
+        <span>{fmtTime(state.dur)}</span>
+      </div>
+      <div className="deck-focus-overview">
+        <span className="deck-focus-wave-label mono">OVERVIEW</span>
+        <DeckWaveform engineDeck={engineDeck} state={state} bpm={bpm} label={label} showTempo={false} />
+      </div>
+      <div className="deck-focus-wave deck-focus-detail">
+        <div className="deck-focus-zoom">
+          <span className="mono">DETAIL</span>
+          <button type="button" onClick={() => changeZoom("out")}
+            disabled={zoomSeconds >= maxZoomSeconds}
+            aria-label={`Zoom out Deck ${label} waveform`} title="Zoom out waveform">−</button>
+          <input
+            className="deck-focus-zoom-range"
+            type="range"
+            min="0"
+            max="1"
+            step="0.001"
+            value={zoomPosition}
+            onChange={(event) => setZoomPosition(event.target.value)}
+            aria-label={`Deck ${label} waveform zoom`}
+            title="Fine waveform zoom"
+          />
+          <output className="mono">{zoomLabel}</output>
+          <button type="button" onClick={() => changeZoom("in")}
+            disabled={zoomSeconds <= minZoomSeconds}
+            aria-label={`Zoom in Deck ${label} waveform`} title="Zoom in waveform">+</button>
+        </div>
+        <DeckWaveform
+          engineDeck={engineDeck}
+          state={state}
+          bpm={bpm}
+          label={label}
+          windowSeconds={zoomSeconds}
+          onZoom={changeZoom}
+        />
+      </div>
+
+      <div className="deck-focus-controls">
+        <div className="deck-focus-control-group deck-focus-transport" aria-label={`Deck ${label} transport`}>
+          <button className="btn" onClick={onPrev} disabled={!hasPlaylistNavigation}
+            aria-label={`Previous track on Deck ${label}`} title="Previous playlist track">
+            <b>│◀</b><small>PREV</small>
+          </button>
+          <button className={`btn deck-focus-play ${state.playing ? "active" : ""}`}
+            onClick={onPlay} disabled={!hasTrack}
+            aria-label={`${state.playing ? "Pause" : "Play"} Deck ${label}`} title="Play or pause">
+            <b>{state.playing ? "Ⅱ" : "▶"}</b><small>{state.playing ? "PAUSE" : "PLAY"}</small>
+          </button>
+          <button className="btn" onClick={onNext} disabled={!hasPlaylistNavigation}
+            aria-label={`Next track on Deck ${label}`} title="Next playlist track">
+            <b>▶│</b><small>NEXT</small>
+          </button>
+          <button className="btn deck-focus-stop" onClick={onStop} disabled={!hasTrack}
+            aria-label={`Stop Deck ${label}`} title="Stop and return to the start">
+            <b>■</b><small>STOP</small>
+          </button>
+          <button className="btn" onClick={onRewind} disabled={!hasTrack}
+            aria-label={`Rewind Deck ${label}`} title={`Rewind ${state.rewindLen.toFixed(1)} seconds`}>
+            <b>◀◀</b><small>−{state.rewindLen.toFixed(0)}s</small>
+          </button>
+        </div>
+        <div className="deck-focus-control-group" aria-label={`Deck ${label} cue controls`}>
+          <button className={`btn deck-focus-cue ${state.cued ? "active" : ""}`}
+            onClick={onSetCue} disabled={!hasTrack}
+            aria-label={`Set cue on Deck ${label}`} aria-pressed={state.cued}>
+            <b>●</b><small>SET CUE</small>
+          </button>
+          <button className="btn deck-focus-cue" onClick={onJumpCue} disabled={!state.cued}
+            aria-label={`Jump to cue on Deck ${label}`}>
+            <b>CUE ▶</b><small>RETURN</small>
+          </button>
+        </div>
+        <div className="deck-focus-control-group" aria-label={`Deck ${label} loop controls`}>
+          <button className={`btn ${state.loopInArmed ? "armed" : ""}`} onClick={setLoopIn}
+            disabled={!hasTrack} aria-label={`Set loop in on Deck ${label}`}
+            aria-pressed={!!state.loopInArmed}>IN</button>
+          <button className="btn" onClick={setLoopOut}
+            disabled={!hasTrack || !state.loopInArmed}
+            aria-label={`Set loop out on Deck ${label}`}>OUT</button>
+          <button className={`btn ${state.loopOn ? "active" : ""}`} onClick={clearLoop}
+            disabled={!state.loopOn && !state.loopInArmed}
+            aria-label={`Clear loop on Deck ${label}`}>CLEAR</button>
+          {[1, 2, 4].map((beats) => (
+            <button key={beats}
+              className={`btn ${state.loopOn && state.loopBeats === beats ? "active" : ""}`}
+              onClick={() => setBeatLoop(beats)} disabled={!hasTrack}
+              aria-label={`${beats}-beat loop on Deck ${label}`}
+              aria-pressed={state.loopOn && state.loopBeats === beats}
+              title={`${beats}-beat loop at ${trackBpm} BPM`}>{beats}<small>BEAT</small></button>
+          ))}
+          <button className="btn" onClick={() => resizeLoop("half")} disabled={!state.loopOn}
+            aria-label={`Halve loop on Deck ${label}`} title="Halve the active loop">
+            <b>÷2</b><small>HALF</small>
+          </button>
+          <button className="btn" onClick={() => resizeLoop("double")} disabled={!state.loopOn}
+            aria-label={`Double loop on Deck ${label}`} title="Double the active loop">
+            <b>×2</b><small>DOUBLE</small>
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function DeckFocusView({
+  mode,
+  setMode,
+  selected,
+  setSelected,
+  decks,
+  onClose,
+}) {
+  const visibleDecks = mode === "double"
+    ? decks
+    : decks.filter((deck) => deck.label === selected);
+  return ReactDOM.createPortal(
+    <div className="modal-overlay deck-focus-overlay" onClick={onClose}>
+      <div className="modal-window panel with-screws deck-focus-modal" role="dialog"
+        aria-modal="true" aria-labelledby="deck-focus-title" onClick={(event) => event.stopPropagation()}>
+        <div className="screw-bl"></div><div className="screw-br"></div>
+        <div className="modal-titlebar deck-focus-titlebar">
+          <span id="deck-focus-title" className="panel-title">Deck performance</span>
+          <div className="deck-focus-mode" aria-label="Deck view mode">
+            <button className={mode === "single" ? "active" : ""}
+              aria-pressed={mode === "single"} onClick={() => setMode("single")}>SINGLE</button>
+            <button className={mode === "double" ? "active" : ""}
+              aria-pressed={mode === "double"} onClick={() => setMode("double")}>DOUBLE</button>
+          </div>
+          {mode === "single" && (
+            <div className="deck-focus-selector" aria-label="Select deck">
+              {decks.map((deck) => (
+                <button key={deck.label} className={selected === deck.label ? "active" : ""}
+                  aria-pressed={selected === deck.label}
+                  onClick={() => setSelected(deck.label)}>DECK {deck.label}</button>
+              ))}
+            </div>
+          )}
+          <button className="btn-xs btn" onClick={onClose} aria-label="Close deck performance view">ESC</button>
+        </div>
+        <div className={`deck-focus-grid deck-focus-grid-${mode}`}>
+          {visibleDecks.map((deck) => <DeckFocusCard key={deck.label} {...deck} />)}
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -367,8 +667,8 @@ function App() {
   }, [ready]);
 
   // === decks ===
-  const [deckA, setDeckA] = useState({ name: "—", time: 0, dur: 0, playing: false, gain: 0.85, pan: 0, mute: false, autoGain: false, rewindLen: 4, playlist: [], playlistIdx: 0, cued: false, loopOn: false, loopIn: 0 });
-  const [deckB, setDeckB] = useState({ name: "—", time: 0, dur: 0, playing: false, gain: 0.85, pan: 0, mute: false, autoGain: false, rewindLen: 4, playlist: [], playlistIdx: 0, cued: false, loopOn: false, loopIn: 0 });
+  const [deckA, setDeckA] = useState({ name: "—", time: 0, dur: 0, playing: false, gain: 0.85, pan: 0, mute: false, autoGain: false, rewindLen: 4, playlist: [], playlistIdx: 0, cued: false, loopOn: false, loopIn: 0, loopInArmed: false, loopBeats: null, analysis: null });
+  const [deckB, setDeckB] = useState({ name: "—", time: 0, dur: 0, playing: false, gain: 0.85, pan: 0, mute: false, autoGain: false, rewindLen: 4, playlist: [], playlistIdx: 0, cued: false, loopOn: false, loopIn: 0, loopInArmed: false, loopBeats: null, analysis: null });
   const [crossfade, setCrossfade] = useState(0.5);
   const [crossfadeCurve, setCrossfadeCurve] = useState("power"); // power | linear | sharp
   const [playlistOpen, setPlaylistOpen] = useState(null); // null | "A" | "B"
@@ -430,6 +730,9 @@ function App() {
   const [advanced, setAdvanced] = useState(false);
   const [sirenSetupOpen, setSirenSetupOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [deckFocusOpen, setDeckFocusOpen] = useState(false);
+  const [deckFocusMode, setDeckFocusMode] = useState("double");
+  const [deckFocusDeck, setDeckFocusDeck] = useState("A");
   const [helpView, setHelpView] = useState("launchpads");
   const [activeDeck, setActiveDeck] = useState("A"); // for shift-modified deck cycling
 
@@ -804,8 +1107,8 @@ function App() {
       }
       if (eng.getLimiterReduction) setGr(eng.getLimiterReduction());
       // deck times
-      setDeckA((s) => ({ ...s, time: eng.deckA.getCurrentTime(), dur: eng.deckA.getDuration(), name: eng.deckA.name, playing: eng.deckA.playing, cued: eng.deckA.hasCue() }));
-      setDeckB((s) => ({ ...s, time: eng.deckB.getCurrentTime(), dur: eng.deckB.getDuration(), name: eng.deckB.name, playing: eng.deckB.playing, cued: eng.deckB.hasCue() }));
+      setDeckA((s) => ({ ...s, time: eng.deckA.getCurrentTime(), dur: eng.deckA.getDuration(), name: eng.deckA.name, playing: eng.deckA.playing, cued: eng.deckA.hasCue(), analysis: eng.deckA.analysis }));
+      setDeckB((s) => ({ ...s, time: eng.deckB.getCurrentTime(), dur: eng.deckB.getDuration(), name: eng.deckB.name, playing: eng.deckB.playing, cued: eng.deckB.hasCue(), analysis: eng.deckB.analysis }));
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
@@ -1608,6 +1911,7 @@ function App() {
       if (k === "Escape") {
         e.preventDefault();
         if (mapperRef.current && mapperRef.current.isLearning()) { mapperRef.current.cancelLearn(); setMidiLearnId(null); return; }
+        if (deckFocusOpen) { setDeckFocusOpen(false); return; }
         if (helpOpen) { setHelpOpen(false); return; }
         if (sirenSetupOpen) { setSirenSetupOpen(false); return; }
         if (playlistOpen) { setPlaylistOpen(null); return; }
@@ -1617,7 +1921,7 @@ function App() {
       if (interactive(e.target)) return;
       if (e.ctrlKey || e.metaKey) return;
       if (k === "?" || (shift && k === "/")) { e.preventDefault(); setHelpOpen(v => !v); return; }
-      if (helpOpen || sirenSetupOpen || playlistOpen || midiOpen) return;
+      if (helpOpen || sirenSetupOpen || playlistOpen || midiOpen || deckFocusOpen) return;
 
       // ---- Screen views (mirror the SETUP / AUDIO / PANEL display tabs) ----
       if (shift && kl === "a") { e.preventDefault(); setMainView("display"); setDisplayMode(m => m === "image" ? "spectrum" : m); return; } // Audio
@@ -1790,7 +2094,7 @@ function App() {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
     };
-  }, [helpOpen, midiOpen, sirenSetupOpen, playlistOpen]);
+  }, [helpOpen, midiOpen, sirenSetupOpen, playlistOpen, deckFocusOpen]);
 
   const toggleRecord = async () => {
     await init();
@@ -1897,7 +2201,12 @@ function App() {
   };
   // A loaded track clears the engine's section loop; mirror that in the strip's
   // loop UI so the ⟳ indicator / IN point don't carry over to the new track.
-  const LOOP_RESET = { loopOn: false, loopIn: 0 };
+  const LOOP_RESET = {
+    loopOn: false,
+    loopIn: 0,
+    loopInArmed: false,
+    loopBeats: null,
+  };
   const nextTrackA = async () => { await init(); if (!canReplaceDeckTrack("A")) return; await eng.deckA.nextTrack(); setDeckA(s => ({ ...s, ...LOOP_RESET, playlistIdx: eng.deckA.playlistIdx, name: eng.deckA.name })); };
   const prevTrackA = async () => { await init(); if (!canReplaceDeckTrack("A")) return; await eng.deckA.prevTrack(); setDeckA(s => ({ ...s, ...LOOP_RESET, playlistIdx: eng.deckA.playlistIdx, name: eng.deckA.name })); };
   const nextTrackB = async () => { await init(); if (!canReplaceDeckTrack("B")) return; await eng.deckB.nextTrack(); setDeckB(s => ({ ...s, ...LOOP_RESET, playlistIdx: eng.deckB.playlistIdx, name: eng.deckB.name })); };
@@ -2658,6 +2967,24 @@ function App() {
         </div>
         <div className="panel with-screws transport-panel">
           <div className="screw-bl"></div><div className="screw-br"></div>
+          <button
+            type="button"
+            className="btn-xs btn deck-focus-open"
+            aria-label="Open expanded deck view"
+            title="Open expanded deck view"
+            onPointerDown={() => {
+              // The first desktop pointer gesture also starts Web Audio. Open on
+              // pointer-down so that initialization cannot replace the button
+              // between down/up and swallow the first click.
+              setDeckFocusDeck(activeDeck);
+              setDeckFocusOpen(true);
+            }}
+            onClick={() => {
+              setDeckFocusDeck(activeDeck);
+              setDeckFocusOpen(true);
+            }}>
+            ⛶
+          </button>
           <div className="transport-decks">
             {[
               { label: "A", state: deckA, deck: () => eng.deckA },
@@ -2667,35 +2994,10 @@ function App() {
                 <div className="td-time mono">{fmtTime(state.time)}</div>
                 <div className="td-time-sub mono">{fmtTime(state.dur)}</div>
                 <div className="td-track">
-                  {state.name && state.name !== "—" ? state.name : `${label === "A" ? "1" : "2"} Empty`}
-                  <div className="td-progress" role="slider"
-                    tabIndex={state.dur > 0 ? 0 : -1}
-                    aria-label={`Deck ${label} playhead`}
-                    aria-valuemin={0}
-                    aria-valuemax={Math.max(0, state.dur)}
-                    aria-valuenow={Math.min(state.time, state.dur)}
-                    aria-valuetext={`${fmtTime(state.time)} of ${fmtTime(state.dur)}`}
-                    onKeyDown={(e) => {
-                      if (!ready || !state.dur) return;
-                      const step = e.shiftKey ? 30 : 5;
-                      let next = state.time;
-                      if (e.key === "ArrowRight" || e.key === "ArrowUp") next += step;
-                      else if (e.key === "ArrowLeft" || e.key === "ArrowDown") next -= step;
-                      else if (e.key === "Home") next = 0;
-                      else if (e.key === "End") next = state.dur;
-                      else return;
-                      e.preventDefault();
-                      e.stopPropagation();
-                      deck().seek(Math.max(0, Math.min(state.dur, next)) / state.dur);
-                    }}
-                    onClick={(e) => {
-                      if (!ready) return;
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      const pct = (e.clientX - rect.left) / rect.width;
-                      deck().seek(pct);
-                    }}>
-                    <div className="td-progress-fill" style={{ width: state.dur ? (state.time / state.dur) * 100 + "%" : "0%" }}></div>
-                  </div>
+                  <span className="td-track-name">
+                    {state.name && state.name !== "—" ? state.name : `${label === "A" ? "1" : "2"} Empty`}
+                  </span>
+                  <DeckWaveform engineDeck={ready ? deck() : null} state={state} bpm={echo.bpm} label={label} />
                 </div>
               </div>
             ))}
@@ -2838,6 +3140,55 @@ function App() {
             <span>{deckLoadWarning.message}</span>
           </div>,
           document.body
+        )}
+
+        {deckFocusOpen && (
+          <DeckFocusView
+            mode={deckFocusMode}
+            setMode={setDeckFocusMode}
+            selected={deckFocusDeck}
+            setSelected={(deck) => {
+              setDeckFocusDeck(deck);
+              setActiveDeck(deck);
+            }}
+            decks={[
+              {
+                label: "A",
+                state: deckA,
+                setState: setDeckA,
+                engineDeck: ready ? eng.deckA : null,
+                bpm: echo.bpm,
+                onPlay: playA,
+                onStop: stopA,
+                onPrev: prevTrackA,
+                onNext: nextTrackA,
+                onRewind: rewindA,
+                onSetCue: () => {
+                  eng.deckA?.setCue();
+                  setDeckA((state) => ({ ...state, cued: true }));
+                },
+                onJumpCue: () => eng.deckA?.jumpToCue(),
+              },
+              {
+                label: "B",
+                state: deckB,
+                setState: setDeckB,
+                engineDeck: ready ? eng.deckB : null,
+                bpm: echo.bpm,
+                onPlay: playB,
+                onStop: stopB,
+                onPrev: prevTrackB,
+                onNext: nextTrackB,
+                onRewind: rewindB,
+                onSetCue: () => {
+                  eng.deckB?.setCue();
+                  setDeckB((state) => ({ ...state, cued: true }));
+                },
+                onJumpCue: () => eng.deckB?.jumpToCue(),
+              },
+            ]}
+            onClose={() => setDeckFocusOpen(false)}
+          />
         )}
 
         {/* HELP / KEYBOARD SHORTCUTS MODAL */}

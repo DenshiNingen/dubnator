@@ -35,6 +35,13 @@ section("synthetic loops loaded");
 ok(eng.deckA.buffer && eng.deckA.buffer.duration > 0, "deck A synthetic buffer loaded");
 ok(eng.deckB.buffer && eng.deckB.buffer.duration > 0, "deck B synthetic buffer loaded");
 
+section("bounded deck BPM and musical-key analysis");
+const trackAnalysis = await eng.deckA.analyze();
+ok(trackAnalysis && trackAnalysis.bpm >= 60 && trackAnalysis.bpm <= 180, "analysis returns a plausible BPM");
+ok(trackAnalysis && trackAnalysis.bpm === 75 && trackAnalysis.tempoSource === "filename", "verified filename BPM wins over an acoustic half/double-tempo guess");
+ok(trackAnalysis && (trackAnalysis.key === null || typeof trackAnalysis.key === "string"), "analysis returns an optional musical key");
+ok(typeof win.DubnatorAnalyzeTrack === "function", "standalone analysis helper is exposed");
+
 section("sample player built 12 slots");
 ok(eng.samples.samples.length === 12, "12 samples generated");
 

@@ -61,7 +61,11 @@ test("custom touch controls cancel safely and expose keyboard slider semantics",
   assert.match(app, /className="setup-tabs" role="tablist"/);
   assert.match(app, /aria-label="Music reverb send" aria-pressed=/);
   assert.match(app, /role="button" tabIndex=\{0\}/);
-  assert.match(app, /aria-label=\{`Deck \$\{label\} playhead`\}/);
+  assert.match(app, /<DeckWaveform engineDeck=\{ready \? deck\(\) : null\}/);
+  assert.match(controls, /function DeckWaveform\(/);
+  assert.match(controls, /aria-label=\{`Deck \$\{label\} \$\{windowSeconds > 0 \? "detailed " : ""\}waveform playhead`\}/);
+  assert.match(css, /\.deck-waveform-loop\s*\{/);
+  assert.match(css, /\.deck-waveform-cue\s*\{/);
   assert.match(controls, /event\.stopPropagation\(\)/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
 });
@@ -101,6 +105,31 @@ test("wide performance surfaces scroll inside their panels on phones", () => {
   assert.match(css, /\.rack-music \.strip-row\s*\{[\s\S]*?overflow-x: auto/);
   assert.match(css, /\.rack-geq \.panel-body\s*\{[\s\S]*?overflow-x: auto/);
   assert.match(css, /\.lp-help-boards,[\s\S]*?scroll-snap-type: x mandatory/);
+});
+
+test("deck transport expands into synchronized single and double performance views", () => {
+  assert.match(app, /aria-label="Open expanded deck view"/);
+  assert.match(app, /function DeckFocusView\(/);
+  assert.match(app, /aria-label="Deck view mode"/);
+  assert.match(app, /aria-pressed=\{mode === "single"\}/);
+  assert.match(app, /aria-pressed=\{mode === "double"\}/);
+  assert.match(app, /<DeckWaveform engineDeck=\{engineDeck\}/);
+  assert.match(app, /windowSeconds=\{zoomSeconds\}/);
+  assert.match(app, /aria-label=\{`Zoom in Deck \$\{label\} waveform`\}/);
+  assert.match(app, /aria-label=\{`Deck \$\{label\} waveform zoom`\}/);
+  assert.match(app, /Math\.exp\(Math\.max\(-120, Math\.min\(120, input\)\) \* 0\.0015\)/);
+  assert.match(app, /aria-label=\{`\$\{state\.playing \? "Pause" : "Play"\} Deck \$\{label\}`\}/);
+  assert.match(app, /aria-label=\{`Rewind Deck \$\{label\}`\}/);
+  assert.match(app, /aria-label=\{`Halve loop on Deck \$\{label\}`\}/);
+  assert.match(app, /aria-label=\{`Double loop on Deck \$\{label\}`\}/);
+  assert.match(controls, /Math\.ceil\(buffer\.duration \* 28\)/);
+  assert.match(controls, /className="deck-waveform-body"/);
+  assert.match(css, /\.deck-focus-grid-double\s*\{[\s\S]*?repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(
+    css,
+    /@media \(max-width: 700px\)[\s\S]*?\.deck-focus-grid-double\s*\{[\s\S]*?grid-template-columns: minmax\(0, 1fr\)/,
+  );
+  assert.match(css, /\.deck-focus-modal\s*\{[\s\S]*?height: min\(820px, 92dvh\)/);
 });
 
 test("legacy viewport scaling cannot shrink the responsive rack", () => {

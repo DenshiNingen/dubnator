@@ -126,6 +126,130 @@ test("focused controls and dialogs isolate global performance shortcuts", async 
   await expect(page.getByRole("dialog", { name: /Help · Keyboard/ })).toBeHidden();
 });
 
+test("deck waveforms seek and expose cue and loop markers", async ({ page }, testInfo) => {
+  await page.goto("/");
+  await page.getByTitle("Click to start the audio engine").click();
+  await page.waitForFunction(() => window.DubnatorEngine?.deckA?.buffer?.duration > 0);
+
+  const deckStrip = page.locator(".rack-music .input-strip.wide").first();
+  const waveform = page.getByRole("slider", { name: "Deck A waveform playhead" });
+  await expect(waveform).toBeVisible();
+  await expect(waveform.locator(".deck-waveform-body")).toHaveAttribute("d", /M/);
+
+  const seekTo = async (fraction) => {
+    const box = await waveform.boundingBox();
+    expect(box).not.toBeNull();
+    await waveform.click({ position: { x: box.width * fraction, y: box.height / 2 } });
+  };
+  await seekTo(0.25);
+  await expect.poll(() => page.evaluate(() => window.DubnatorEngine.deckA.getCurrentTime()))
+    .toBeGreaterThan(1.5);
+
+  await deckStrip.getByTitle("Set hot-cue at the playhead").click();
+  await expect(waveform.locator(".deck-waveform-cue")).toBeVisible();
+
+  await deckStrip.getByTitle("Show rewind / pan / loop controls").click();
+  const analyze = deckStrip.getByTitle("Estimate this track's tempo and musical key");
+  await analyze.click();
+  await expect(analyze).toHaveText("ANALYZE", { timeout: 10_000 });
+  await expect(deckStrip.locator(".deck-analysis-readout")).toContainText("75 BPM");
+  await expect(waveform.locator(".deck-waveform-tempo")).toContainText("75 BPM");
+
+  await deckStrip.getByTitle("Set loop start at the playhead").click();
+  await seekTo(0.75);
+  await deckStrip.getByTitle("Set loop end at the playhead + engage").click();
+  await expect(waveform.locator(".deck-waveform-loop")).toBeVisible();
+
+  await testInfo.attach("deck-waveform", {
+    body: await page.locator(".transport-panel").screenshot(),
+    contentType: "image/png",
+  });
+  await testInfo.attach("deck-analysis", {
+    body: await page.locator(".rack-music").screenshot(),
+    contentType: "image/png",
+  });
+});
+
+test("expanded deck view switches between double and single performance layouts", async ({ page }, testInfo) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open expanded deck view" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Deck performance" });
+  await expectInsideViewport(dialog, page);
+  await expect(dialog.getByRole("button", { name: "DOUBLE", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(dialog.locator(".deck-focus-card")).toHaveCount(2);
+  await expect.poll(() => dialog.locator(".deck-focus-card").evaluateAll((cards) => cards.every((card) => {
+    const cardBox = card.getBoundingClientRect();
+    const controlsBox = card.querySelector(".deck-focus-controls")?.getBoundingClientRect();
+    return controlsBox && controlsBox.bottom <= cardBox.bottom + 1;
+  }))).toBe(true);
+  await testInfo.attach("expanded-deck-double", {
+    body: await dialog.screenshot(),
+    contentType: "image/png",
+  });
+
+  await dialog.getByRole("button", { name: "SINGLE", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "SINGLE", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(dialog.locator(".deck-focus-card")).toHaveCount(1);
+
+  await dialog.getByRole("button", { name: "DECK B" }).click();
+  await expect(dialog.locator(".deck-focus-card")).toHaveCount(1);
+  await expect(dialog.locator("section[aria-label='Deck B']")).toBeVisible();
+  await expect(dialog.getByRole("slider", { name: "Deck B detailed waveform playhead" })).toBeVisible();
+  await expect(dialog.locator(".deck-focus-zoom output")).toHaveText("16s");
+  await dialog.getByRole("button", { name: "Zoom in Deck B waveform" }).click();
+  await expect(dialog.locator(".deck-focus-zoom output")).toHaveText("15s");
+  await dialog.getByRole("button", { name: "Zoom in Deck B waveform" }).click();
+  await expect(dialog.locator(".deck-focus-zoom output")).toHaveText("14s");
+  await dialog.getByRole("slider", { name: "Deck B waveform zoom" }).fill("1");
+  await expect(dialog.locator(".deck-focus-zoom output")).toHaveText("2.0s");
+  const detailedViewBox = await dialog.locator(".deck-focus-detail .deck-waveform-svg").getAttribute("viewBox");
+  expect(Number(detailedViewBox.split(/\s+/)[2])).toBeLessThan(1000);
+
+  await expect(dialog.getByRole("button", { name: "Previous track on Deck B" })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "Next track on Deck B" })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Play Deck B" }).click();
+  await expect.poll(() => page.evaluate(() => window.DubnatorEngine.deckB.playing)).toBe(true);
+  await dialog.getByRole("button", { name: "Pause Deck B" }).click();
+  await expect.poll(() => page.evaluate(() => window.DubnatorEngine.deckB.playing)).toBe(false);
+
+  await page.evaluate(() => window.DubnatorEngine.deckB.seek(0.25));
+  await dialog.getByRole("button", { name: "Set cue on Deck B" }).click();
+  await expect.poll(() => page.evaluate(() => window.DubnatorEngine.deckB.cuePoint)).toBeGreaterThan(1);
+  await dialog.getByRole("button", { name: "Jump to cue on Deck B" }).click();
+
+  await dialog.getByRole("button", { name: "2-beat loop on Deck B" }).click();
+  const initialLoopLength = await page.evaluate(() => {
+    const deck = window.DubnatorEngine.deckB;
+    return deck.loopB - deck.loopA;
+  });
+  await dialog.getByRole("button", { name: "Halve loop on Deck B" }).click();
+  await expect.poll(() => page.evaluate(() => {
+    const deck = window.DubnatorEngine.deckB;
+    return deck.loopB - deck.loopA;
+  })).toBeLessThan(initialLoopLength);
+  await dialog.getByRole("button", { name: "Double loop on Deck B" }).click();
+  await dialog.getByRole("button", { name: "Clear loop on Deck B" }).click();
+  await expect.poll(() => page.evaluate(() => window.DubnatorEngine.deckB.loopB)).toBe(0);
+
+  await dialog.getByRole("button", { name: "Set loop in on Deck B" }).click();
+  await expect(dialog.getByRole("button", { name: "Set loop out on Deck B" })).toBeEnabled();
+  await page.evaluate(() => window.DubnatorEngine.deckB.seek(0.7));
+  await dialog.getByRole("button", { name: "Set loop out on Deck B" }).click();
+  await expect.poll(() => page.evaluate(() => window.DubnatorEngine.deckB.loopB)).toBeGreaterThan(0);
+  await dialog.getByRole("button", { name: "Clear loop on Deck B" }).click();
+  await dialog.getByRole("button", { name: "Rewind Deck B" }).click();
+  await dialog.getByRole("button", { name: "Stop Deck B" }).click();
+
+  await testInfo.attach("expanded-deck-single", {
+    body: await dialog.screenshot(),
+    contentType: "image/png",
+  });
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+});
+
 test("tool windows stay reachable inside every screen", async ({ page }) => {
   await page.goto("/");
 

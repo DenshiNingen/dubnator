@@ -121,6 +121,7 @@ test("siren preset moved to keys 2 and 3", () => {
 
 test("global performance shortcuts ignore focused controls and open tools", () => {
   assert.match(SRC, /closest\?\.\("input, textarea, select, button, \[role='slider'\]/);
-  assert.match(SRC, /if \(helpOpen \|\| sirenSetupOpen \|\| playlistOpen \|\| midiOpen\) return/);
+  assert.match(SRC, /if \(helpOpen \|\| sirenSetupOpen \|\| playlistOpen \|\| midiOpen \|\| deckFocusOpen\) return/);
+  assert.match(SRC, /if \(deckFocusOpen\) \{ setDeckFocusOpen\(false\); return; \}/);
   assert.match(SRC, /if \(midiOpen\) \{ setMidiOpen\(false\); return; \}/);
 });

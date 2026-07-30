@@ -20,6 +20,122 @@
     encodeAiffPCM16,
   } = window.DubnatorAudioCodecs;
 
+  // Lightweight offline analysis for the deck overview. It deliberately uses
+  // bounded, downsampled windows so even long tracks finish without scanning
+  // every sample or touching the live audio graph.
+  function analyzeTrackBuffer(buffer) {
+    if (!buffer || !buffer.length || !buffer.sampleRate) return null;
+    const channel = buffer.getChannelData(0);
+    const sampleRate = buffer.sampleRate;
+
+    // Onset-envelope autocorrelation. Weighting slightly favours the slower
+    // member of common half/double-tempo pairs, which suits reggae and dub.
+    const envelopeRate = 200;
+    const hop = Math.max(32, Math.round(sampleRate / envelopeRate));
+    const analysisSamples = Math.min(channel.length, Math.floor(sampleRate * 150));
+    const envelope = [];
+    let previous = 0;
+    for (let start = 0; start < analysisSamples; start += hop) {
+      const end = Math.min(analysisSamples, start + hop);
+      let energy = 0;
+      for (let sample = start; sample < end; sample++) {
+        const value = channel[sample] || 0;
+        energy += value * value;
+      }
+      energy = Math.sqrt(energy / Math.max(1, end - start));
+      envelope.push(Math.max(0, energy - previous * 0.92));
+      previous = energy;
+    }
+    const minBpm = 60;
+    const maxBpm = 180;
+    const minLag = Math.floor((envelopeRate * 60) / maxBpm);
+    const maxLag = Math.min(envelope.length - 1, Math.ceil((envelopeRate * 60) / minBpm));
+    let bestLag = 0;
+    let bestScore = 0;
+    let scoreSum = 0;
+    let scoreCount = 0;
+    for (let lag = minLag; lag <= maxLag; lag++) {
+      let cross = 0;
+      let left = 0;
+      let right = 0;
+      for (let i = lag; i < envelope.length; i++) {
+        const a = envelope[i];
+        const b = envelope[i - lag];
+        cross += a * b;
+        left += a * a;
+        right += b * b;
+      }
+      const normalized = cross / Math.max(1e-12, Math.sqrt(left * right));
+      const weighted = normalized * Math.pow(lag / maxLag, 0.16);
+      scoreSum += weighted;
+      scoreCount++;
+      if (weighted > bestScore) {
+        bestScore = weighted;
+        bestLag = lag;
+      }
+    }
+    const bpm = bestLag ? Math.round((envelopeRate * 60) / bestLag) : null;
+    const bpmConfidence = bestScore
+      ? Math.max(0, Math.min(1, (bestScore - scoreSum / Math.max(1, scoreCount)) / bestScore))
+      : 0;
+
+    // Coarse chroma via a bounded Goertzel bank (C2–B5). Comparing the pitch
+    // classes with major/minor key profiles gives an intentionally approximate
+    // musical key, useful as a starting point rather than a claim of certainty.
+    const targetRate = 8000;
+    const downsample = Math.max(1, Math.floor(sampleRate / targetRate));
+    const chromaRate = sampleRate / downsample;
+    const chromaSamples = Math.min(
+      Math.floor(channel.length / downsample),
+      Math.floor(chromaRate * 24),
+    );
+    const chroma = new Float64Array(12);
+    for (let midi = 36; midi <= 83; midi++) {
+      const frequency = 440 * Math.pow(2, (midi - 69) / 12);
+      const coefficient = 2 * Math.cos((2 * Math.PI * frequency) / chromaRate);
+      let q0 = 0;
+      let q1 = 0;
+      let q2 = 0;
+      for (let i = 0, source = 0; i < chromaSamples; i++, source += downsample) {
+        q0 = (channel[source] || 0) + coefficient * q1 - q2;
+        q2 = q1;
+        q1 = q0;
+      }
+      const power = Math.max(0, q1 * q1 + q2 * q2 - coefficient * q1 * q2);
+      chroma[midi % 12] += Math.sqrt(power);
+    }
+    const majorProfile = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
+    const minorProfile = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
+    const noteNames = ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"];
+    const candidates = [];
+    const profileScore = (profile, root) => {
+      let dot = 0;
+      let energy = 0;
+      let profileEnergy = 0;
+      for (let pitch = 0; pitch < 12; pitch++) {
+        const weight = profile[(pitch - root + 12) % 12];
+        dot += chroma[pitch] * weight;
+        energy += chroma[pitch] * chroma[pitch];
+        profileEnergy += weight * weight;
+      }
+      return dot / Math.max(1e-12, Math.sqrt(energy * profileEnergy));
+    };
+    for (let root = 0; root < 12; root++) {
+      candidates.push({ key: noteNames[root], score: profileScore(majorProfile, root) });
+      candidates.push({ key: `${noteNames[root]}m`, score: profileScore(minorProfile, root) });
+    }
+    candidates.sort((a, b) => b.score - a.score);
+    const keyConfidence = candidates[0]?.score
+      ? Math.max(0, Math.min(1, (candidates[0].score - candidates[1].score) / candidates[0].score))
+      : 0;
+    return {
+      bpm,
+      key: candidates[0]?.key || null,
+      confidence: +Math.min(bpmConfidence, Math.max(0.05, keyConfidence * 4)).toFixed(2),
+      tempoSource: "audio",
+    };
+  }
+
   class Deck {
     constructor(ctx, label) {
       this.ctx = ctx;
@@ -31,6 +147,7 @@
       this.playing = false;
       this.name = "—";
       this.cuePoint = null; // hot-cue position (seconds), null = unset
+      this.analysis = null;
 
       // kill chain — 5 evenly-spaced isolator bands (SUB 80 · LOW 300 · MID 1000
       // · HIGH 3000 · TOP 8000)
@@ -223,10 +340,15 @@
       }
       this.buffer = buffer;
       this.name = file.name;
+      this.analysis = null;
       this.offset = 0;
       this.loopA = 0; this.loopB = 0; // a new track clears any section loop
       this.cuePoint = null;
       this.stop();
+      // Populate the always-visible BPM/key readout without making the user
+      // open the deck's secondary controls. Analysis runs on the next idle
+      // opportunity and guards against a newer track replacing this buffer.
+      this.analyze().catch(() => {});
     }
 
     async loadSynthetic(seed = 1) {
@@ -264,6 +386,7 @@
       }
       this.buffer = buf;
       this.name = seed === 1 ? "DUB LOOP A — 75 BPM" : "DUB LOOP B — 75 BPM";
+      this.analysis = { bpm: 75, key: null, confidence: 1 };
       this.offset = 0;
       this.loopA = 0; this.loopB = 0; this.cuePoint = null;
       this.stop();
@@ -357,6 +480,26 @@
     }
     clearCue() { this.cuePoint = null; }
     hasCue() { return this.cuePoint != null; }
+    async analyze() {
+      if (!this.buffer) return null;
+      const target = this.buffer;
+      await new Promise((resolve) => {
+        if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(resolve, { timeout: 250 });
+        else if (typeof window.setTimeout === "function") window.setTimeout(resolve, 0);
+        else resolve();
+      });
+      const result = analyzeTrackBuffer(target);
+      // DJ/radio files very often carry an explicitly verified BPM in their
+      // filename. Prefer that over an acoustic half/double-tempo guess.
+      const nameBpm = String(this.name || "").match(/(?:^|\D)(\d{2,3}(?:\.\d+)?)\s*bpm(?:\D|$)/i);
+      const hintedBpm = nameBpm ? Number(nameBpm[1]) : 0;
+      if (result && hintedBpm >= 40 && hintedBpm <= 240) {
+        result.bpm = Math.round(hintedBpm);
+        result.tempoSource = "filename";
+      }
+      if (this.buffer === target) this.analysis = result;
+      return result;
+    }
     // Beat-loop: loop `beats` worth of audio from the current playhead, sized
     // to the given BPM. Reuses the section-loop machinery (clamps to buffer).
     setBeatLoop(bpm, beats) {
@@ -1838,4 +1981,5 @@
   window.DubnatorEncodeWav = encodeWavPCM16;
   window.DubnatorEncodeAiff = encodeAiffPCM16;
   window.DubnatorAiffDuration = aiffDuration;
+  window.DubnatorAnalyzeTrack = analyzeTrackBuffer;
 })();
