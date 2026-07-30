@@ -7,9 +7,10 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = join(ROOT, "dist");
 
-const [html, serviceWorker] = await Promise.all([
+const [html, serviceWorker, manifest] = await Promise.all([
   readFile(join(DIST, "index.html"), "utf8"),
   readFile(join(DIST, "sw.js"), "utf8"),
+  readFile(join(DIST, "manifest.webmanifest"), "utf8").then(JSON.parse),
 ]);
 
 function localAssets(document) {
@@ -24,6 +25,10 @@ test("production HTML uses only local runtime assets", () => {
   assert.equal([...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>/g)].length, 0);
   assert.match(html, /vendor\/react\.min\.js/);
   assert.match(html, /audio-codecs\.js\?v=[a-f0-9]{8}/);
+});
+
+test("installed mobile app supports both portrait and landscape", () => {
+  assert.equal(manifest.orientation, "any");
 });
 
 test("compatibility globals load before their consumers", () => {
