@@ -39,6 +39,14 @@ test("compact screens expose a sticky section navigator without widening the pag
   assert.match(css, /#root\s*\{[\s\S]*?min-width: 0/);
 });
 
+test("short coarse-pointer screens make floating tools full-screen", () => {
+  assert.match(css, /@media \(max-width: 900px\) and \(max-height: 600px\) and \(pointer: coarse\)/);
+  assert.match(
+    css,
+    /\.floating-window\s*\{[\s\S]*?width: 100vw !important;[\s\S]*?height: 100dvh !important/,
+  );
+});
+
 test("labels every main rack region for stable responsive placement", () => {
   for (const className of [
     "rack-music",

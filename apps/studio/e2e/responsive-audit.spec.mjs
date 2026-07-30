@@ -1,5 +1,18 @@
 import { expect, test } from "@playwright/test";
 
+async function expectInsideViewport(locator, page) {
+  await expect(locator).toBeVisible();
+  await expect.poll(async () => {
+    const box = await locator.boundingBox();
+    const viewport = page.viewportSize();
+    if (!box || !viewport) return false;
+    return box.x >= -1
+      && box.y >= -1
+      && box.x + box.width <= viewport.width + 1
+      && box.y + box.height <= viewport.height + 1;
+  }).toBe(true);
+}
+
 test("keeps every rack region inside the page viewport", async ({ page }, testInfo) => {
   await page.goto("/");
   await expect(page.locator(".chassis")).toBeVisible();
@@ -84,4 +97,30 @@ test("compact rack navigation reaches and tracks distant controls", async ({ pag
   await inputs.click();
   await expect(inputs).toHaveAttribute("aria-current", "location");
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeLessThan(300);
+});
+
+test("tool windows stay reachable inside every screen", async ({ page }) => {
+  await page.goto("/");
+
+  const playlistButton = page.locator(".rack-music .input-strip.wide").first()
+    .getByTitle(/Open Playlist/);
+  await playlistButton.click();
+  const playlist = page.locator(".floating-window.playlist-modal");
+  await expectInsideViewport(playlist, page);
+  await playlist.getByRole("button", { name: "ESC" }).click();
+
+  await page.locator(".rack-siren").getByRole("button", { name: "SETUP" }).click();
+  const sirenSetup = page.locator(".floating-window").filter({ hasText: "Dub Siren — Setup" });
+  await expectInsideViewport(sirenSetup, page);
+  await sirenSetup.locator(".floating-titlebar .btn").click();
+
+  await page.getByTitle("Keyboard shortcuts (?)").click();
+  const help = page.locator(".help-modal");
+  await expectInsideViewport(help, page);
+  await help.getByRole("button", { name: "ESC" }).click();
+
+  await page.getByTitle("MIDI controller mapping").click();
+  const midi = page.locator(".modal-window").filter({ hasText: "MIDI Mapping" });
+  await expectInsideViewport(midi, page);
+  await midi.getByRole("button", { name: "ESC" }).click();
 });
