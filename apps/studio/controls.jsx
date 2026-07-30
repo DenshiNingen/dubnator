@@ -26,30 +26,95 @@ function useMidiLearn(midiId) {
   return { learning, tryLearn, mappable };
 }
 
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function controlLabel(label, midiId, fallback) {
+  if (label) return label;
+  if (midiId) return midiId.replace(/[._-]+/g, " ");
+  return fallback;
+}
+
+function handleSliderKey(event, value, min, max, onChange) {
+  const range = max - min;
+  const fineStep = range / 100;
+  const coarseStep = range / 10;
+  let next;
+  switch (event.key) {
+    case "ArrowUp":
+    case "ArrowRight":
+      next = value + (event.shiftKey ? coarseStep : fineStep);
+      break;
+    case "ArrowDown":
+    case "ArrowLeft":
+      next = value - (event.shiftKey ? coarseStep : fineStep);
+      break;
+    case "PageUp":
+      next = value + coarseStep;
+      break;
+    case "PageDown":
+      next = value - coarseStep;
+      break;
+    case "Home":
+      next = min;
+      break;
+    case "End":
+      next = max;
+      break;
+    default:
+      return;
+  }
+  event.preventDefault();
+  onChange(clamp(next, min, max));
+}
+
+function useWindowPointerDrag() {
+  const cleanupRef = useRef(null);
+  const stop = useCallback(() => {
+    if (cleanupRef.current) cleanupRef.current();
+  }, []);
+
+  useEffect(() => stop, [stop]);
+
+  return useCallback((onMove, onEnd) => {
+    stop();
+    const cleanup = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      if (cleanupRef.current === cleanup) cleanupRef.current = null;
+    };
+    const finish = (event) => {
+      cleanup();
+      if (onEnd) onEnd(event);
+    };
+    cleanupRef.current = cleanup;
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+  }, [stop]);
+}
+
 // ============ KNOB ============
-function Knob({ value, min = 0, max = 1, onChange, label, format, size = "md", midiId, tone = "" }) {
+function Knob({ value, min = 0, max = 1, onChange, label, format, size = "md", midiId, tone = "", ariaLabel }) {
   const ref = useRef(null);
   const drag = useRef(null);
+  const startPointerDrag = useWindowPointerDrag();
   const { learning, tryLearn, mappable } = useMidiLearn(midiId);
 
   const onPointerDown = (e) => {
     if (tryLearn(e)) return;
     e.preventDefault();
     drag.current = { y: e.clientY, v: value };
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
+    startPointerDrag(onPointerMove, () => { drag.current = null; });
   };
   const onPointerMove = (e) => {
     if (!drag.current) return;
     const dy = drag.current.y - e.clientY;
     const range = max - min;
-    const next = Math.max(min, Math.min(max, drag.current.v + (dy / 150) * range));
+    const next = clamp(drag.current.v + (dy / 150) * range, min, max);
     onChange(next);
-  };
-  const onPointerUp = () => {
-    drag.current = null;
-    window.removeEventListener("pointermove", onPointerMove);
-    window.removeEventListener("pointerup", onPointerUp);
   };
 
   const pct = (value - min) / (max - min);
@@ -61,6 +126,14 @@ function Knob({ value, min = 0, max = 1, onChange, label, format, size = "md", m
         ref={ref}
         className={`knob ${size === "sm" ? "sm" : size === "lg" ? "lg" : ""} ${learning ? "midi-learning" : ""}`}
         onPointerDown={onPointerDown}
+        onKeyDown={(event) => handleSliderKey(event, value, min, max, onChange)}
+        role="slider"
+        tabIndex={0}
+        aria-label={controlLabel(ariaLabel || label, midiId, "Rotary control")}
+        aria-valuemin={min}
+        aria-valuemax={max}
+        aria-valuenow={value}
+        aria-valuetext={format ? format(value) : undefined}
         title={mappable ? "Cmd+Shift+click to MIDI-learn this control" : undefined}
       >
         <div
@@ -75,9 +148,10 @@ function Knob({ value, min = 0, max = 1, onChange, label, format, size = "md", m
 }
 
 // ============ VERTICAL SLIDER ============
-function VSlider({ value, min = -12, max = 12, onChange, label, height = 120, center = true, midiId }) {
+function VSlider({ value, min = -12, max = 12, onChange, label, height = 120, center = true, midiId, ariaLabel }) {
   const trackRef = useRef(null);
   const drag = useRef(null);
+  const startPointerDrag = useWindowPointerDrag();
   const { learning, tryLearn, mappable } = useMidiLearn(midiId);
 
   const onPointerDown = (e) => {
@@ -86,19 +160,13 @@ function VSlider({ value, min = -12, max = 12, onChange, label, height = 120, ce
     const rect = trackRef.current.getBoundingClientRect();
     const setFromY = (clientY) => {
       const pct = 1 - (clientY - rect.top) / rect.height;
-      onChange(Math.max(min, Math.min(max, min + pct * (max - min))));
+      onChange(clamp(min + pct * (max - min), min, max));
     };
     setFromY(e.clientY);
     drag.current = setFromY;
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
+    startPointerDrag(onMove, () => { drag.current = null; });
   };
   const onMove = (e) => drag.current && drag.current(e.clientY);
-  const onUp = () => {
-    drag.current = null;
-    window.removeEventListener("pointermove", onMove);
-    window.removeEventListener("pointerup", onUp);
-  };
 
   const pct = (value - min) / (max - min);
   const thumbBottom = pct * (height - 14);
@@ -110,6 +178,14 @@ function VSlider({ value, min = -12, max = 12, onChange, label, height = 120, ce
         className={`vslider-track ${learning ? "midi-learning" : ""}`}
         style={{ height }}
         onPointerDown={onPointerDown}
+        onKeyDown={(event) => handleSliderKey(event, value, min, max, onChange)}
+        role="slider"
+        tabIndex={0}
+        aria-label={controlLabel(ariaLabel || label, midiId, "Vertical slider")}
+        aria-orientation="vertical"
+        aria-valuemin={min}
+        aria-valuemax={max}
+        aria-valuenow={value}
         title={mappable ? "Cmd+Shift+click to MIDI-learn this control" : undefined}
       >
         {center && <div className="center-line" />}
@@ -339,6 +415,7 @@ function LED({ on, color, label }) {
 function Crossfader({ value, onChange, midiId }) {
   const ref = useRef(null);
   const drag = useRef(null);
+  const startPointerDrag = useWindowPointerDrag();
   const { learning, tryLearn, mappable } = useMidiLearn(midiId);
   const onDown = (e) => {
     if (tryLearn(e)) return;
@@ -346,21 +423,19 @@ function Crossfader({ value, onChange, midiId }) {
     const rect = ref.current.getBoundingClientRect();
     const setFromX = (cx) => {
       const pct = (cx - rect.left) / rect.width;
-      onChange(Math.max(0, Math.min(1, pct)));
+      onChange(clamp(pct, 0, 1));
     };
     setFromX(e.clientX);
     drag.current = setFromX;
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
+    startPointerDrag(onMove, () => { drag.current = null; });
   };
   const onMove = (e) => drag.current && drag.current(e.clientX);
-  const onUp = () => {
-    drag.current = null;
-    window.removeEventListener("pointermove", onMove);
-    window.removeEventListener("pointerup", onUp);
-  };
   return (
     <div className={`xfader ${learning ? "midi-learning" : ""}`} ref={ref} onPointerDown={onDown}
+      onKeyDown={(event) => handleSliderKey(event, value, 0, 1, onChange)}
+      role="slider" tabIndex={0} aria-label="Crossfader" aria-orientation="horizontal"
+      aria-valuemin={0} aria-valuemax={1} aria-valuenow={value}
+      aria-valuetext={`Deck A ${Math.round((1 - value) * 100)}%, Deck B ${Math.round(value * 100)}%`}
       title={mappable ? "Cmd+Shift+click to MIDI-learn this control" : undefined}>
       <div className="xfader-thumb" style={{ left: `calc(${value * 100}% - 12px)` }} />
     </div>
@@ -368,9 +443,10 @@ function Crossfader({ value, onChange, midiId }) {
 }
 
 // ============ TALL FADER ============
-function Fader({ value, min = 0, max = 1.5, onChange, height = 200, midiId }) {
+function Fader({ value, min = 0, max = 1.5, onChange, height = 200, midiId, ariaLabel }) {
   const trackRef = useRef(null);
   const drag = useRef(null);
+  const startPointerDrag = useWindowPointerDrag();
   const { learning, tryLearn, mappable } = useMidiLearn(midiId);
 
   const onPointerDown = (e) => {
@@ -379,25 +455,23 @@ function Fader({ value, min = 0, max = 1.5, onChange, height = 200, midiId }) {
     const rect = trackRef.current.getBoundingClientRect();
     const setFromY = (clientY) => {
       const pct = 1 - (clientY - rect.top) / rect.height;
-      onChange(Math.max(min, Math.min(max, min + pct * (max - min))));
+      onChange(clamp(min + pct * (max - min), min, max));
     };
     setFromY(e.clientY);
     drag.current = setFromY;
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
+    startPointerDrag(onMove, () => { drag.current = null; });
   };
   const onMove = (e) => drag.current && drag.current(e.clientY);
-  const onUp = () => {
-    drag.current = null;
-    window.removeEventListener("pointermove", onMove);
-    window.removeEventListener("pointerup", onUp);
-  };
 
   const pct = (value - min) / (max - min);
   const thumbBottom = pct * (height - 18);
 
   return (
     <div className={`fader-track ${learning ? "midi-learning" : ""}`} ref={trackRef} style={{ height }} onPointerDown={onPointerDown}
+      onKeyDown={(event) => handleSliderKey(event, value, min, max, onChange)}
+      role="slider" tabIndex={0}
+      aria-label={controlLabel(ariaLabel, midiId, "Channel fader")}
+      aria-orientation="vertical" aria-valuemin={min} aria-valuemax={max} aria-valuenow={value}
       title={mappable ? "Cmd+Shift+click to MIDI-learn this control" : undefined}>
       <div className="ticks"></div>
       <div className="fader-thumb" style={{ bottom: thumbBottom }} />

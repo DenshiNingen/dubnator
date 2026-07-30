@@ -124,3 +124,77 @@ test("tool windows stay reachable inside every screen", async ({ page }) => {
   await expectInsideViewport(midi, page);
   await midi.getByRole("button", { name: "ESC" }).click();
 });
+
+test("custom rack sliders support direct keyboard control", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-wide", "One desktop project covers keyboard semantics");
+
+  await page.goto("/");
+  const crossfader = page.getByRole("slider", { name: "Crossfader" });
+  await crossfader.focus();
+  await page.keyboard.press("End");
+  await expect(crossfader).toHaveAttribute("aria-valuenow", "1");
+  await expect(crossfader).toHaveAttribute("aria-valuetext", /Deck B 100%/);
+
+  await page.keyboard.press("Home");
+  await expect(crossfader).toHaveAttribute("aria-valuenow", "0");
+  await expect(crossfader).toHaveAttribute("aria-valuetext", /Deck A 100%/);
+
+  const echoSend = page.locator(".rack-echo").getByRole("slider", { name: "SEND" });
+  const initial = Number(await echoSend.getAttribute("aria-valuenow"));
+  await echoSend.focus();
+  await page.keyboard.press("ArrowUp");
+  await expect.poll(async () => Number(await echoSend.getAttribute("aria-valuenow"))).toBeGreaterThan(initial);
+});
+
+test("an interrupted touch drag releases its rack control", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "tablet-landscape", "One touch project covers pointer cancellation");
+
+  await page.goto("/");
+  const echoSend = page.locator(".rack-echo").getByRole("slider", { name: "SEND" });
+  const box = await echoSend.boundingBox();
+  expect(box).not.toBeNull();
+  const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  const before = Number(await echoSend.getAttribute("aria-valuenow"));
+
+  await echoSend.dispatchEvent("pointerdown", {
+    pointerId: 7,
+    pointerType: "touch",
+    isPrimary: true,
+    buttons: 1,
+    clientX: point.x,
+    clientY: point.y,
+  });
+  await page.evaluate(({ x, y }) => {
+    window.dispatchEvent(new PointerEvent("pointermove", {
+      pointerId: 7,
+      pointerType: "touch",
+      isPrimary: true,
+      buttons: 1,
+      clientX: x,
+      clientY: y - 45,
+    }));
+  }, point);
+  await expect.poll(async () => Number(await echoSend.getAttribute("aria-valuenow"))).toBeGreaterThan(before);
+
+  await page.evaluate(({ x, y }) => {
+    window.dispatchEvent(new PointerEvent("pointercancel", {
+      pointerId: 7,
+      pointerType: "touch",
+      isPrimary: true,
+      clientX: x,
+      clientY: y - 45,
+    }));
+  }, point);
+  const releasedAt = Number(await echoSend.getAttribute("aria-valuenow"));
+  await page.evaluate(({ x, y }) => {
+    window.dispatchEvent(new PointerEvent("pointermove", {
+      pointerId: 7,
+      pointerType: "touch",
+      isPrimary: true,
+      buttons: 1,
+      clientX: x,
+      clientY: y - 80,
+    }));
+  }, point);
+  await expect.poll(async () => Number(await echoSend.getAttribute("aria-valuenow"))).toBe(releasedAt);
+});

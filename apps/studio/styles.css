@@ -213,6 +213,13 @@ body {
 }
 .knob.sm { width: 24px; height: 24px; }
 .knob.lg { width: 56px; height: 56px; }
+.knob:focus-visible,
+.vslider-track:focus-visible,
+.fader-track:focus-visible,
+.xfader:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
 /* MIDI-learn: a control armed for learning (Ctrl+Shift+click) pulses in accent */
 @keyframes midiLearnPulse {
   0%, 100% { box-shadow: 0 0 0 2px var(--accent), 0 0 6px 1px rgba(255,90,40,0.65); }

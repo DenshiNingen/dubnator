@@ -3,11 +3,12 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const root = new URL("../", import.meta.url);
-const [html, css, app, bootstrap] = await Promise.all([
+const [html, css, app, bootstrap, controls] = await Promise.all([
   readFile(new URL("Dubnator.html", root), "utf8"),
   readFile(new URL("styles.css", root), "utf8"),
   readFile(new URL("app.jsx", root), "utf8"),
   readFile(new URL("bootstrap.js", root), "utf8"),
+  readFile(new URL("controls.jsx", root), "utf8"),
 ]);
 
 test("uses the real device viewport without disabling pinch zoom", () => {
@@ -45,6 +46,15 @@ test("short coarse-pointer screens make floating tools full-screen", () => {
     css,
     /\.floating-window\s*\{[\s\S]*?width: 100vw !important;[\s\S]*?height: 100dvh !important/,
   );
+});
+
+test("custom touch controls cancel safely and expose keyboard slider semantics", () => {
+  assert.match(controls, /function useWindowPointerDrag\(\)/);
+  assert.match(controls, /addEventListener\("pointercancel", finish\)/);
+  assert.match(controls, /function handleSliderKey\(/);
+  assert.ok((controls.match(/role="slider"/g) || []).length >= 4);
+  assert.ok((controls.match(/tabIndex=\{0\}/g) || []).length >= 4);
+  assert.match(css, /\.knob:focus-visible,[\s\S]*?outline: 2px solid var\(--accent\)/);
 });
 
 test("labels every main rack region for stable responsive placement", () => {
