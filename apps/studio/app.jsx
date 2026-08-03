@@ -6,6 +6,7 @@ const ECHO_DIVS = ["1/4", "1/4.", "1/4t", "1/8", "1/8.", "1/8t", "1/16", "1/16t"
 const DECK_END_MODES = ["stop", "loop", "next"];
 const LAUNCHPAD_BRIGHTNESS_LEVELS = [0, 18, 36, 54, 73, 91, 109, 127];
 const LAUNCHPAD_BRIGHTNESS_KEY = "dubnator.launchpad.brightness.v1";
+const PLAYLIST_LINK_KEY = "dubnator.playlists.linked.v1";
 const METER_FRAME_MS = 1000 / 30;
 const deckEndModeFromValue = (value) => value < 0.25 ? "stop" : value < 0.75 ? "loop" : "next";
 const deckEndModeValue = (mode) => mode === "next" ? 1 : mode === "loop" ? 0.5 : 0;
@@ -152,6 +153,21 @@ function CompactRackNav() {
   );
 }
 
+function TrackArtwork({ metadata, className = "", label = "Track artwork" }) {
+  const src = metadata?.artworkUrl;
+  return (
+    <span className={`track-artwork ${src ? "has-artwork" : "is-empty"} ${className}`.trim()}>
+      {src
+        ? <img src={src} alt={label} draggable="false" />
+        : <span aria-hidden="true">♪</span>}
+    </span>
+  );
+}
+
+function deckDisplayName(state, emptyLabel) {
+  return state.metadata?.title || (state.name && state.name !== "—" ? state.name : emptyLabel);
+}
+
 
 function DeckStrip({ label, state, set, meter, play, stop, onFile, deck, onPrev, onNext, onRewind, onSetCue, onJumpCue, bpm = 120, onOpenPlaylist, dropProps, dropActive, midiPrefix }) {
   const [more, setMore] = useState(false); // collapse RWD/PAN · A-G · loop controls
@@ -207,8 +223,17 @@ function DeckStrip({ label, state, set, meter, play, stop, onFile, deck, onPrev,
           ))}
         </div>
       </div>
-      {/* channel name */}
-      <div className="strip-name">{label}</div>
+      {/* channel identity */}
+      <div className="deck-strip-identity">
+        <TrackArtwork metadata={state.metadata} className="deck-strip-art"
+          label={`Artwork for ${deckDisplayName(state, label)}`} />
+        <div>
+          <div className="strip-name">{label}</div>
+          <span className="deck-strip-title" title={deckDisplayName(state, label)}>
+            {deckDisplayName(state, "NO TRACK")}
+          </span>
+        </div>
+      </div>
       {/* eject + load */}
       <label className="load-btn" style={{ width: "100%", height: 18 }} title="Load audio file(s) — multi-select for playlist">
         ▲
@@ -402,9 +427,12 @@ function DeckFocusCard({
     <section className={`deck-focus-card deck-focus-${label.toLowerCase()}`} aria-label={`Deck ${label}`}>
       <header className="deck-focus-card-header">
         <span className="deck-focus-letter mono">{label}</span>
+        <TrackArtwork metadata={state.metadata} className="deck-focus-header-art"
+          label={`Artwork for ${deckDisplayName(state, `Deck ${label}`)}`} />
         <div className="deck-focus-track">
-          <strong>{state.name && state.name !== "—" ? state.name : `Deck ${label} empty`}</strong>
+          <strong>{deckDisplayName(state, `Deck ${label} empty`)}</strong>
           <span className="mono">
+            {state.metadata?.artist ? `${state.metadata.artist} · ` : ""}
             {state.analysis?.bpm
               ? `${state.analysis.tempoSource === "audio" ? "≈" : ""}${state.analysis.bpm} BPM`
               : `GRID ${Math.round(bpm)} BPM`}
@@ -422,9 +450,13 @@ function DeckFocusCard({
         <strong>{fmtTime(state.time)}</strong>
         <span>{fmtTime(state.dur)}</span>
       </div>
-      <div className="deck-focus-overview">
-        <span className="deck-focus-wave-label mono">OVERVIEW</span>
-        <DeckWaveform engineDeck={engineDeck} state={state} bpm={bpm} label={label} showTempo={false} />
+      <div className="deck-focus-overview-stage">
+        <TrackArtwork metadata={state.metadata} className="deck-focus-cover"
+          label={`Artwork for ${deckDisplayName(state, `Deck ${label}`)}`} />
+        <div className="deck-focus-overview">
+          <span className="deck-focus-wave-label mono">OVERVIEW</span>
+          <DeckWaveform engineDeck={engineDeck} state={state} bpm={bpm} label={label} showTempo={false} />
+        </div>
       </div>
       <div className="deck-focus-wave deck-focus-detail">
         <div className="deck-focus-zoom">
@@ -667,11 +699,14 @@ function App() {
   }, [ready]);
 
   // === decks ===
-  const [deckA, setDeckA] = useState({ name: "—", time: 0, dur: 0, playing: false, gain: 0.85, pan: 0, mute: false, autoGain: false, rewindLen: 4, playlist: [], playlistIdx: 0, cued: false, loopOn: false, loopIn: 0, loopInArmed: false, loopBeats: null, analysis: null });
-  const [deckB, setDeckB] = useState({ name: "—", time: 0, dur: 0, playing: false, gain: 0.85, pan: 0, mute: false, autoGain: false, rewindLen: 4, playlist: [], playlistIdx: 0, cued: false, loopOn: false, loopIn: 0, loopInArmed: false, loopBeats: null, analysis: null });
+  const [deckA, setDeckA] = useState({ name: "—", time: 0, dur: 0, playing: false, gain: 0.85, pan: 0, mute: false, autoGain: false, rewindLen: 4, playlist: [], playlistIdx: 0, cued: false, loopOn: false, loopIn: 0, loopInArmed: false, loopBeats: null, analysis: null, metadata: {} });
+  const [deckB, setDeckB] = useState({ name: "—", time: 0, dur: 0, playing: false, gain: 0.85, pan: 0, mute: false, autoGain: false, rewindLen: 4, playlist: [], playlistIdx: 0, cued: false, loopOn: false, loopIn: 0, loopInArmed: false, loopBeats: null, analysis: null, metadata: {} });
   const [crossfade, setCrossfade] = useState(0.5);
   const [crossfadeCurve, setCrossfadeCurve] = useState("power"); // power | linear | sharp
   const [playlistOpen, setPlaylistOpen] = useState(null); // null | "A" | "B"
+  const [playlistsLinked, setPlaylistsLinked] = useState(() => {
+    try { return localStorage.getItem(PLAYLIST_LINK_KEY) !== "0"; } catch (_) { return true; }
+  });
   const [deckLoadWarning, setDeckLoadWarning] = useState(null);
   const deckLoadWarningTimerRef = useRef(null);
 
@@ -1107,8 +1142,8 @@ function App() {
       }
       if (eng.getLimiterReduction) setGr(eng.getLimiterReduction());
       // deck times
-      setDeckA((s) => ({ ...s, time: eng.deckA.getCurrentTime(), dur: eng.deckA.getDuration(), name: eng.deckA.name, playing: eng.deckA.playing, cued: eng.deckA.hasCue(), analysis: eng.deckA.analysis }));
-      setDeckB((s) => ({ ...s, time: eng.deckB.getCurrentTime(), dur: eng.deckB.getDuration(), name: eng.deckB.name, playing: eng.deckB.playing, cued: eng.deckB.hasCue(), analysis: eng.deckB.analysis }));
+      setDeckA((s) => ({ ...s, time: eng.deckA.getCurrentTime(), dur: eng.deckA.getDuration(), name: eng.deckA.name, playing: eng.deckA.playing, cued: eng.deckA.hasCue(), analysis: eng.deckA.analysis, metadata: eng.deckA.metadata || {} }));
+      setDeckB((s) => ({ ...s, time: eng.deckB.getCurrentTime(), dur: eng.deckB.getDuration(), name: eng.deckB.name, playing: eng.deckB.playing, cued: eng.deckB.hasCue(), analysis: eng.deckB.analysis, metadata: eng.deckB.metadata || {} }));
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
@@ -2155,6 +2190,62 @@ function App() {
     if (deckLoadWarningTimerRef.current) clearTimeout(deckLoadWarningTimerRef.current);
   }, []);
 
+  useEffect(() => {
+    try { localStorage.setItem(PLAYLIST_LINK_KEY, playlistsLinked ? "1" : "0"); } catch (_) {}
+  }, [playlistsLinked]);
+
+  const samePlaylistFile = (a, b) => a === b || !!(a && b
+    && a.name === b.name
+    && a.size === b.size
+    && a.lastModified === b.lastModified);
+
+  // Both decks share collection order while keeping independent loaded tracks,
+  // playheads and playlist indices. A mirror uses cloned arrays so unlinking is
+  // immediate and later mutations cannot leak across decks.
+  const syncLinkedPlaylist = (sourceKey, force = false) => {
+    if (!force && !playlistsLinked) return;
+    const source = sourceKey === "B" ? eng.deckB : eng.deckA;
+    const target = sourceKey === "B" ? eng.deckA : eng.deckB;
+    if (!source || !target) return;
+    const targetCurrent = target.file || target.playlist?.[target.playlistIdx];
+    target.playlist = [...(source.playlist || [])];
+    const preservedIndex = targetCurrent
+      ? target.playlist.findIndex((file) => samePlaylistFile(file, targetCurrent))
+      : -1;
+    target.playlistIdx = preservedIndex >= 0
+      ? preservedIndex
+      : Math.min(target.playlistIdx || 0, Math.max(0, target.playlist.length - 1));
+    const sourceState = sourceKey === "B" ? setDeckB : setDeckA;
+    const targetState = sourceKey === "B" ? setDeckA : setDeckB;
+    sourceState((state) => ({
+      ...state,
+      playlist: source.playlist.map((file) => file.name),
+      playlistIdx: source.playlistIdx,
+    }));
+    targetState((state) => ({
+      ...state,
+      playlist: target.playlist.map((file) => file.name),
+      playlistIdx: target.playlistIdx,
+    }));
+  };
+
+  const togglePlaylistLink = (next, preferredSource = activeDeck) => {
+    const enabled = typeof next === "boolean" ? next : !playlistsLinked;
+    setPlaylistsLinked(enabled);
+    if (!enabled) {
+      if (eng.deckA) eng.deckA.playlist = [...eng.deckA.playlist];
+      if (eng.deckB) eng.deckB.playlist = [...eng.deckB.playlist];
+      return;
+    }
+    const preferred = preferredSource === "B" ? "B" : "A";
+    const preferredDeck = preferred === "B" ? eng.deckB : eng.deckA;
+    const otherDeck = preferred === "B" ? eng.deckA : eng.deckB;
+    const source = preferredDeck?.playlist?.length || !otherDeck?.playlist?.length
+      ? preferred
+      : preferred === "B" ? "A" : "B";
+    syncLinkedPlaylist(source, true);
+  };
+
   // Shared deck loader for both the hidden file inputs and drag-and-drop.
   // Adds files to the deck playlist; if the deck has no buffer yet, cues the
   // first one (decoding via the engine's AIFF fallback when needed).
@@ -2168,18 +2259,19 @@ function App() {
     if (shouldLoad && !canReplaceDeckTrack(deckKey)) return false;
     const startIdx = engDeck.playlist.length; // index of the first newly-added file
     files.forEach(f => engDeck.addToPlaylist(f));
+    syncLinkedPlaylist(deckKey);
     // Cue the dropped/loaded track when the deck is empty, or when the caller
     // forces it (an explicit drop onto a deck loads that track immediately).
     if (shouldLoad) {
       try {
         await engDeck.loadPlaylistIndex(startIdx);
-        setDeck((s) => ({ ...s, name: files[0].name, playlist: [...s.playlist, ...files.map(f => f.name)], playlistIdx: startIdx, playing: false }));
+        setDeck((s) => ({ ...s, name: files[0].name, playlist: engDeck.playlist.map((file) => file.name), playlistIdx: startIdx, playing: false }));
       } catch (err) {
         console.error(`Deck ${deckKey} load failed`, err);
-        setDeck((s) => ({ ...s, name: "⚠ CAN'T DECODE — " + files[0].name, playlist: [...s.playlist, ...files.map(f => f.name)], playlistIdx: startIdx }));
+        setDeck((s) => ({ ...s, name: "⚠ CAN'T DECODE — " + files[0].name, playlist: engDeck.playlist.map((file) => file.name), playlistIdx: startIdx }));
       }
     } else {
-      setDeck((s) => ({ ...s, playlist: [...s.playlist, ...files.map(f => f.name)] }));
+      setDeck((s) => ({ ...s, playlist: engDeck.playlist.map((file) => file.name) }));
     }
     return true;
   };
@@ -2281,6 +2373,7 @@ function App() {
   };
   const [outDevices, setOutDevices] = useState([]);
   const [outDeviceId, setOutDeviceId] = useState("");
+  const [outErr, setOutErr] = useState("");
   useEffect(() => {
     if (!ready || !eng.canSetOutput || !eng.canSetOutput()) return;
     eng.listOutputDevices().then(setOutDevices).catch(() => {});
@@ -2288,15 +2381,39 @@ function App() {
   const onPickOutput = async (id) => {
     // Only commit the selection if the actual switch succeeds, so the dropdown
     // can't show a device the audio isn't routed to.
-    try { await eng.setOutputDevice(id || undefined); setOutDeviceId(id); } catch (_) {}
+    try {
+      await eng.setOutputDevice(id || undefined);
+      setOutDeviceId(id);
+      setOutErr("");
+    } catch (error) {
+      setOutErr(error?.message || "Could not switch audio output.");
+    }
   };
   const scanOutputs = async () => {
-    // WebKit lists output devices with IDs/labels only after a mic grant.
+    // Keep the picker call in this click handler: selectAudioOutput requires
+    // transient user activation in supporting browsers.
     try {
-      if (eng.ensureOutputPermission) await eng.ensureOutputPermission();
+      const selected = eng.requestOutputDevice
+        ? await eng.requestOutputDevice(outDeviceId || undefined)
+        : null;
       const list = await eng.listOutputDevices();
-      setOutDevices(list);
-    } catch (_) {}
+      const merged = selected && !list.some((device) => device.deviceId === selected.deviceId)
+        ? [selected, ...list]
+        : list;
+      setOutDevices(merged);
+      if (selected?.deviceId) {
+        await eng.setOutputDevice(selected.deviceId);
+        setOutDeviceId(selected.deviceId);
+      }
+      setOutErr(merged.length
+        ? ""
+        : "No selectable outputs were exposed. The system default remains active.");
+    } catch (error) {
+      const message = error?.name === "NotAllowedError"
+        ? "Output selection was denied. Reset this site's audio permissions and try again."
+        : error?.message || "Could not detect audio outputs.";
+      setOutErr(message);
+    }
   };
   const [lineOn, setLineOn] = useState(false);
   const [lineErr, setLineErr] = useState("");
@@ -2832,7 +2949,17 @@ function App() {
                 <>
                   <div className="setup-divider" style={{ marginTop: 4 }}></div>
                   <div className="section-label">OUTPUT</div>
-                  {outDevices.filter((d) => d.deviceId && d.deviceId !== "default").length > 0 ? (
+                  {outErr && (
+                    <div className="warning-strip" style={{ marginBottom: 4, fontSize: 8 }}>
+                      {outErr}
+                    </div>
+                  )}
+                  {outDevices.length === 1 && (
+                    <div className="mono" style={{ marginBottom: 4, color: "var(--text-dim)", fontSize: 8 }}>
+                      SYSTEM DEFAULT · {outDevices[0].label || "system output"}
+                    </div>
+                  )}
+                  {outDevices.filter((d) => d.deviceId && d.deviceId !== "default").length > 0 && (
                     <select className="mic-device-select mono" value={outDeviceId}
                       onChange={(e) => onPickOutput(e.target.value)} title="Master output device">
                       <option value="">System default</option>
@@ -2840,10 +2967,11 @@ function App() {
                         <option key={d.deviceId} value={d.deviceId}>{d.label}</option>
                       ))}
                     </select>
-                  ) : (
-                    <button className="btn-xs btn" onClick={scanOutputs}
-                      title="Detect audio output devices — macOS requires microphone permission to list devices">DETECT DEVICES</button>
                   )}
+                  <button className="btn-xs btn" onClick={scanOutputs}
+                    title="Open the browser output picker, or request device permission when unavailable">
+                    {navigator.mediaDevices?.selectAudioOutput ? "CHOOSE OUTPUT" : "DETECT DEVICES"}
+                  </button>
                 </>
               )}
             </div>
@@ -2985,17 +3113,30 @@ function App() {
             }}>
             ⛶
           </button>
+          <button
+            type="button"
+            className={`deck-playlist-link ${playlistsLinked ? "active" : ""}`}
+            aria-pressed={playlistsLinked}
+            onClick={() => togglePlaylistLink(!playlistsLinked, activeDeck)}
+            title={playlistsLinked
+              ? "Deck A and B share playlist order · click to separate them"
+              : "Deck playlists are separate · click to share the active deck playlist"}>
+            <span aria-hidden="true">{playlistsLinked ? "A ⇄ B" : "A │ B"}</span>
+            <small>{playlistsLinked ? "SHARED" : "SEPARATE"}</small>
+          </button>
           <div className="transport-decks">
             {[
               { label: "A", state: deckA, deck: () => eng.deckA },
               { label: "B", state: deckB, deck: () => eng.deckB },
             ].map(({ label, state, deck }) => (
               <div key={label} className="transport-deck-row">
+                <TrackArtwork metadata={state.metadata} className="td-art"
+                  label={`Artwork for ${deckDisplayName(state, `Deck ${label}`)}`} />
                 <div className="td-time mono">{fmtTime(state.time)}</div>
                 <div className="td-time-sub mono">{fmtTime(state.dur)}</div>
                 <div className="td-track">
                   <span className="td-track-name">
-                    {state.name && state.name !== "—" ? state.name : `${label === "A" ? "1" : "2"} Empty`}
+                    {deckDisplayName(state, `${label === "A" ? "1" : "2"} Empty`)}
                   </span>
                   <DeckWaveform engineDeck={ready ? deck() : null} state={state} bpm={echo.bpm} label={label} />
                 </div>
@@ -3127,6 +3268,9 @@ function App() {
           deckA={deckA} deckB={deckB}
           setDeckA={setDeckA} setDeckB={setDeckB}
           canReplaceDeckTrack={canReplaceDeckTrack}
+          playlistsLinked={playlistsLinked}
+          onTogglePlaylistLink={(next) => togglePlaylistLink(next, playlistOpen || activeDeck)}
+          onPlaylistChange={(deckKey) => syncLinkedPlaylist(deckKey)}
           onClose={() => setPlaylistOpen(null)}
           onSwitchDeck={(d) => { setActiveDeck(d); setPlaylistOpen(d); }}
         />

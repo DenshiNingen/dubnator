@@ -146,6 +146,8 @@
       this.offset = 0;
       this.playing = false;
       this.name = "—";
+      this.file = null;
+      this.metadata = {};
       this.cuePoint = null; // hot-cue position (seconds), null = unset
       this.analysis = null;
 
@@ -340,6 +342,14 @@
       }
       this.buffer = buffer;
       this.name = file.name;
+      this.file = file;
+      this.metadata = {};
+      const metadataReader = window.DubnatorTrackMetadata;
+      if (metadataReader?.get) {
+        metadataReader.get(file).then((metadata) => {
+          if (this.file === file) this.metadata = metadata || {};
+        }).catch(() => {});
+      }
       this.analysis = null;
       this.offset = 0;
       this.loopA = 0; this.loopB = 0; // a new track clears any section loop
@@ -386,6 +396,8 @@
       }
       this.buffer = buf;
       this.name = seed === 1 ? "DUB LOOP A — 75 BPM" : "DUB LOOP B — 75 BPM";
+      this.file = null;
+      this.metadata = {};
       this.analysis = { bpm: 75, key: null, confidence: 1 };
       this.offset = 0;
       this.loopA = 0; this.loopB = 0; this.cuePoint = null;
@@ -1692,6 +1704,26 @@
         this._devicePermGranted = true;
         return true;
       } catch (_) { return false; }
+    }
+    // Open the browser's dedicated speaker picker when available. Unlike
+    // enumerateDevices(), selectAudioOutput() can grant one output without
+    // borrowing microphone permission. Call this directly from a user click.
+    async requestOutputDevice(previousDeviceId) {
+      const md = (typeof navigator !== "undefined") && navigator.mediaDevices;
+      if (!md) throw new Error("Audio output selection is not available here");
+      if (typeof md.selectAudioOutput === "function") {
+        const options = previousDeviceId ? { deviceId: previousDeviceId } : undefined;
+        const selected = await md.selectAudioOutput(options);
+        return {
+          deviceId: selected.deviceId,
+          label: selected.label || "Selected output",
+        };
+      }
+      const granted = await this.ensureOutputPermission();
+      if (!granted) {
+        throw new Error("Audio-device permission is blocked. Reset this site's microphone permission, then try again.");
+      }
+      return null;
     }
     // Route the master output to a chosen device. Chromium uses AudioContext.setSinkId;
     // WebKit falls back to a MediaStreamDestination -> <audio>.setSinkId branch, engaged

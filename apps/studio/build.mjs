@@ -3,7 +3,8 @@
 // - Vendors React, ReactDOM, JSZip from node_modules into dist/vendor/
 // - Versions every local asset referenced by the HTML template
 // - Outputs dist/index.html (Tauri's default entry) plus dist/Dubnator.html
-// `node build.mjs --serve` watches sources and serves dist/ on :1420 for Tauri dev.
+// `node build.mjs --serve` watches sources and serves dist/ on :1420 by default.
+// E2E can provide DUBNATOR_E2E_URL to use an isolated port.
 
 import * as esbuild from "esbuild";
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -23,6 +24,11 @@ const ROOT = dirname(fileURLToPath(import.meta.url));
 const DIST = join(ROOT, "dist");
 const VENDOR = join(DIST, "vendor");
 const SERVE = process.argv.includes("--serve");
+let servePort = 1420;
+try {
+  const requestedPort = new URL(process.env.DUBNATOR_E2E_URL || "").port;
+  if (requestedPort) servePort = Number(requestedPort);
+} catch (_) {}
 
 const JSX_ENTRIES = [
   "controls.jsx",
@@ -34,6 +40,8 @@ const JSX_ENTRIES = [
   "app.jsx",
 ];
 const STATIC_FILES = [
+  "track-metadata.js",
+  "rekordbox.js",
   "audio-codecs.js",
   "audio-engine.js",
   "bootstrap.js",
@@ -52,8 +60,10 @@ const VENDOR_MAP = {
 
 async function rewriteHtml() {
   const src = await readFile(join(ROOT, "Dubnator.html"), "utf8");
-  const [cssV, codecsV, audioV, bootstrapV, launchpadV, midiV, midiControlsV, tapTempoV, registerSwV] = await Promise.all([
+  const [cssV, metadataV, rekordboxV, codecsV, audioV, bootstrapV, launchpadV, midiV, midiControlsV, tapTempoV, registerSwV] = await Promise.all([
     assetHash("styles.css"),
+    assetHash("track-metadata.js"),
+    assetHash("rekordbox.js"),
     assetHash("audio-codecs.js"),
     assetHash("audio-engine.js"),
     assetHash("bootstrap.js"),
@@ -71,6 +81,8 @@ async function rewriteHtml() {
   }
   let out = src
     .replaceAll("styles.css?v=0", `styles.css?v=${cssV}`)
+    .replaceAll("track-metadata.js?v=0", `track-metadata.js?v=${metadataV}`)
+    .replaceAll("rekordbox.js?v=0", `rekordbox.js?v=${rekordboxV}`)
     .replaceAll("audio-codecs.js?v=0", `audio-codecs.js?v=${codecsV}`)
     .replaceAll("audio-engine.js?v=0", `audio-engine.js?v=${audioV}`)
     .replaceAll("bootstrap.js?v=0", `bootstrap.js?v=${bootstrapV}`)
@@ -98,6 +110,8 @@ async function rewriteHtml() {
   return [
     "index.html",
     `styles.css?v=${cssV}`,
+    `track-metadata.js?v=${metadataV}`,
+    `rekordbox.js?v=${rekordboxV}`,
     `audio-codecs.js?v=${codecsV}`,
     `audio-engine.js?v=${audioV}`,
     `bootstrap.js?v=${bootstrapV}`,
@@ -196,7 +210,7 @@ async function main() {
 
   if (SERVE) {
     await ctx.watch();
-    const server = await ctx.serve({ servedir: DIST, port: 1420, host: "127.0.0.1" });
+    const server = await ctx.serve({ servedir: DIST, port: servePort, host: "127.0.0.1" });
     console.log(`\nDubnator dev server: http://${server.host}:${server.port}/`);
     console.log("Watching JSX sources. Static asset edits require a rebuild.\n");
   } else {

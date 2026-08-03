@@ -2,6 +2,14 @@
 const { useEffect, useMemo, useRef, useState } = React;
 const eng = window.DubnatorEngine;
 const { useFloatingBox } = window.DubnatorFloating;
+const trackMetadata = window.DubnatorTrackMetadata;
+const rekordbox = window.DubnatorRekordbox;
+
+const trackKey = (file) => `${file?.name || ""}|${file?.size || 0}|${file?.lastModified || 0}`;
+const isAudioFile = (file) => !!file && (
+  file.type?.startsWith("audio/")
+  || /\.(mp3|wav|aiff?|flac|ogg|m4a|aac|opus)$/i.test(file.name || "")
+);
 
 // === Saved-playlist storage (localStorage) ===
 // We persist only filenames + order. Audio data isn't saved (browser security).
@@ -36,21 +44,36 @@ function fmtSavedDate(ts) {
 // Shows track #, name, duration (lazily decoded). Click row to load+select that track.
 // Per-row: ↑ ↓ (reorder), × (remove). Footer: + Add Files / Shuffle / Clear All.
 // Native drag-drop of audio files from OS supported.
-function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, canReplaceDeckTrack, onClose, onSwitchDeck }) {
+function PlaylistModal({
+  open,
+  deckKey,
+  deckA,
+  deckB,
+  setDeckA,
+  setDeckB,
+  canReplaceDeckTrack,
+  playlistsLinked,
+  onTogglePlaylistLink,
+  onPlaylistChange,
+  onClose,
+  onSwitchDeck,
+}) {
   const [durations, setDurations] = useState({}); // key: `${deck}|${idx}|${name}` -> seconds
+  const [metadata, setMetadata] = useState({});
   const dropRef = useRef(null);
   const [dragOver, setDragOver] = useState(false);
   const [plFilter, setPlFilter] = useState(""); // playlist name filter
   const fb = useFloatingBox({ w: 740, h: 520 }, 420, 320); // floating window box
 
   // Save/load UI state
-  const [view, setView] = useState("list"); // "list" | "saved"
+  const [view, setView] = useState("list"); // "list" | "saved" | "rekordbox"
   const [saveNameOpen, setSaveNameOpen] = useState(false);
   const [saveName, setSaveName] = useState("");
   const [savedPlaylists, setSavedPlaylists] = useState(() => loadSavedPlaylists());
   // Reconcile state for loading: when user picks a saved set, we need files from disk.
   // shape: { id, name, tracks: [...names], pickedFiles: Map<lower(name), File>, missing: [names] }
   const [reconcile, setReconcile] = useState(null);
+  const [rekordboxImport, setRekordboxImport] = useState(null);
   const [toast, setToast] = useState(null); // {msg, kind}
   const toastTimer = useRef(null);
   const showToast = (msg, kind = "info") => {
@@ -92,6 +115,14 @@ function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, canRep
           if (dur) setDurations(d => ({ ...d, [key]: dur }));
         }).catch(() => {});
       });
+      const metaKey = trackKey(file);
+      if (metadata[metaKey] == null && trackMetadata?.get) {
+        trackMetadata.get(file).then((info) => {
+          setMetadata((current) => current[metaKey] != null
+            ? current
+            : { ...current, [metaKey]: info || {} });
+        }).catch(() => {});
+      }
     });
   }, [open, deckKey, state.playlist.length, state.playlist.join("|")]);
 
@@ -126,6 +157,7 @@ function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, canRep
     if (!engDeck) return;
     if (to < 0 || to >= engDeck.playlist.length) return;
     engDeck.movePlaylistItem(from, to);
+    onPlaylistChange?.(deckKey);
     setState(s => ({
       ...s,
       playlist: engDeck.playlist.map(f => f.name),
@@ -136,6 +168,7 @@ function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, canRep
     if (!engDeck) return;
     const wasPlaying = i === engDeck.playlistIdx;
     engDeck.removeAt(i);
+    onPlaylistChange?.(deckKey);
     setState(s => ({
       ...s,
       playlist: engDeck.playlist.map(f => f.name),
@@ -148,11 +181,13 @@ function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, canRep
     if (engDeck.playlist.length === 0) return;
     engDeck.stop && engDeck.stop();
     engDeck.clearPlaylist();
+    onPlaylistChange?.(deckKey);
     setState(s => ({ ...s, playlist: [], playlistIdx: 0, name: "—", playing: false }));
   };
   const onShuffle = () => {
     if (!engDeck) return;
     engDeck.shufflePlaylist();
+    onPlaylistChange?.(deckKey);
     setState(s => ({
       ...s,
       playlist: engDeck.playlist.map(f => f.name),
@@ -213,7 +248,7 @@ function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, canRep
     });
   };
   const onReconcileFiles = (filesIn) => {
-    const files = Array.from(filesIn || []).filter(f => f.type.startsWith("audio/") || /\.(mp3|wav|flac|ogg|m4a|aac|opus)$/i.test(f.name));
+    const files = Array.from(filesIn || []).filter(isAudioFile);
     if (!files.length) return;
     setReconcile(r => {
       if (!r) return r;
@@ -245,6 +280,7 @@ function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, canRep
     if (engDeck.stop) engDeck.stop();
     engDeck.clearPlaylist();
     ordered.forEach(f => engDeck.addToPlaylist(f));
+    onPlaylistChange?.(deckKey);
     await engDeck.loadPlaylistIndex(0);
     setState(s => ({
       ...s,
@@ -392,6 +428,7 @@ function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, canRep
       if (engDeck.stop) engDeck.stop();
       engDeck.clearPlaylist();
       audioFiles.forEach(f => engDeck.addToPlaylist(f));
+      onPlaylistChange?.(deckKey);
       await engDeck.loadPlaylistIndex(0);
       setState(s => ({
         ...s,
@@ -447,12 +484,84 @@ function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, canRep
     }
   };
   const onImportInput = (e) => { importBundle(e.target.files?.[0]); e.target.value = ""; };
+
+  const importRekordboxXml = async (file) => {
+    if (!file || !rekordbox?.parse) return;
+    try {
+      const parsed = rekordbox.parse(await file.text());
+      if (!parsed.playlists.length) throw new Error("No playlists found");
+      setRekordboxImport({
+        sourceName: file.name,
+        playlists: parsed.playlists,
+        selectedPath: parsed.playlists[0].path,
+      });
+      setReconcile(null);
+      setView("rekordbox");
+      showToast(`Read ${parsed.playlists.length} Rekordbox playlist${parsed.playlists.length === 1 ? "" : "s"}`, "ok");
+    } catch (error) {
+      console.error("Rekordbox import failed", error);
+      showToast(error?.message || "Could not read Rekordbox XML", "warn");
+    }
+  };
+  const onRekordboxInput = (event) => {
+    importRekordboxXml(event.target.files?.[0]);
+    event.target.value = "";
+  };
+
+  const selectedRekordbox = rekordboxImport?.playlists?.find((playlist) => (
+    playlist.path === rekordboxImport.selectedPath
+  )) || null;
+  const rekordboxLoadedMatch = selectedRekordbox && rekordbox?.matchPlaylistFiles
+    ? rekordbox.matchPlaylistFiles(selectedRekordbox, engDeck?.playlist || [])
+    : { ordered: [], missing: [], unused: [] };
+
+  const applyRekordboxOrder = async (filesInput) => {
+    if (!selectedRekordbox || !engDeck || !rekordbox?.matchPlaylistFiles) return;
+    const pool = Array.from(filesInput || engDeck.playlist || []).filter(isAudioFile);
+    const result = rekordbox.matchPlaylistFiles(selectedRekordbox, pool);
+    if (!result.ordered.length) {
+      showToast("No local audio matched this Rekordbox playlist", "warn");
+      return;
+    }
+    const currentFile = engDeck.file || engDeck.playlist[engDeck.playlistIdx];
+    const currentIndex = currentFile
+      ? result.ordered.findIndex((file) => file === currentFile || (
+        file.name === currentFile.name
+        && file.size === currentFile.size
+        && file.lastModified === currentFile.lastModified
+      ))
+      : -1;
+    const needsNewTrack = currentIndex < 0 || !engDeck.buffer;
+    if (needsNewTrack && canReplaceDeckTrack && !canReplaceDeckTrack(deckKey)) return;
+    engDeck.playlist = [...result.ordered];
+    engDeck.playlistIdx = currentIndex >= 0 ? currentIndex : 0;
+    if (needsNewTrack) {
+      engDeck.stop?.();
+      await engDeck.loadPlaylistIndex(engDeck.playlistIdx);
+    }
+    setState((current) => ({
+      ...current,
+      playlist: engDeck.playlist.map((file) => file.name),
+      playlistIdx: engDeck.playlistIdx,
+      name: engDeck.name,
+      playing: needsNewTrack ? false : current.playing,
+    }));
+    onPlaylistChange?.(deckKey);
+    setView("list");
+    const skipped = result.missing.length;
+    showToast(
+      `Applied Rekordbox order · ${result.ordered.length} matched${skipped ? ` · ${skipped} missing` : ""}`,
+      skipped ? "info" : "ok",
+    );
+  };
+
   const onAdd = async (filesIn) => {
-    const files = Array.from(filesIn || []).filter(f => f.type.startsWith("audio/") || /\.(mp3|wav|flac|ogg|m4a|aac|opus)$/i.test(f.name));
+    const files = Array.from(filesIn || []).filter(isAudioFile);
     if (!files.length || !engDeck) return;
     const wasEmpty = engDeck.playlist.length === 0;
     if (wasEmpty && canReplaceDeckTrack && !canReplaceDeckTrack(deckKey)) return;
     files.forEach(f => engDeck.addToPlaylist(f));
+    onPlaylistChange?.(deckKey);
     if (wasEmpty) {
       await engDeck.loadPlaylistIndex(0);
       setState(s => ({
@@ -477,6 +586,7 @@ function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, canRep
     e.preventDefault();
     setDragOver(false);
     if (view === "saved" && reconcile) { onReconcileFiles(e.dataTransfer.files); return; }
+    if (view === "rekordbox" && selectedRekordbox) { applyRekordboxOrder(e.dataTransfer.files); return; }
     onAdd(e.dataTransfer.files);
   };
 
@@ -512,6 +622,14 @@ function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, canRep
               onClick={() => onSwitchDeck("B")}>
               DECK B · {(eng.deckB?.playlist || []).length}
             </button>
+            <button className={`pl-link-toggle ${playlistsLinked ? "active" : ""}`}
+              aria-pressed={!!playlistsLinked}
+              onClick={() => onTogglePlaylistLink?.(!playlistsLinked)}
+              title={playlistsLinked
+                ? "Both decks share this playlist order · click to separate"
+                : "Deck playlists are separate · click to share this deck's order"}>
+              {playlistsLinked ? "A ⇄ B · SHARED" : "A │ B · SEPARATE"}
+            </button>
           </div>
 
           <button className="btn-xs btn" onClick={onClose}>ESC</button>
@@ -526,6 +644,7 @@ function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, canRep
             <span className="pl-stats-now">
               {view === "saved"
                 ? "BROWSING SAVED PLAYLISTS"
+                : view === "rekordbox" ? "IMPORTING REKORDBOX ORDER"
                 : files.length > 0 ? `Now: ${String(curIdx + 1).padStart(2, "0")} / ${String(files.length).padStart(2, "0")}` : "— empty —"}
             </span>
           </div>
@@ -548,6 +667,7 @@ function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, canRep
                 <div className="pl-list-head">
                   <span className="c-num">#</span>
                   <span className="c-state"></span>
+                  <span className="c-art"></span>
                   <span className="c-name">NAME</span>
                   <span className="c-dur">TIME</span>
                   <span className="c-act"></span>
@@ -564,9 +684,10 @@ function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, canRep
                   .map(({ file, i }) => {
                   const key = `${deckKey}|${i}|${file.name}|${file.size}`;
                   const dur = durations[key];
+                  const info = metadata[trackKey(file)] || {};
                   const isCur = i === curIdx;
                   return (
-                    <div key={i}
+                    <div key={trackKey(file) + i}
                       className={`pl-row ${isCur ? "current" : ""}`}
                       onDoubleClick={() => onLoad(i)}>
                       <span className="c-num">{String(i + 1).padStart(2, "0")}</span>
@@ -575,7 +696,17 @@ function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, canRep
                           : isCur ? <span className="pl-cued">●</span>
                           : <span className="pl-idle"></span>}
                       </span>
-                      <span className="c-name" title={file.name}>{file.name}</span>
+                      <span className={`c-art ${info.artworkUrl ? "has-artwork" : ""}`}>
+                        {info.artworkUrl
+                          ? <img src={info.artworkUrl} alt="" draggable="false" />
+                          : <span aria-hidden="true">♪</span>}
+                      </span>
+                      <span className="c-name" title={file.name}>
+                        <b>{info.title || file.name}</b>
+                        {(info.artist || info.album) && (
+                          <small>{[info.artist, info.album].filter(Boolean).join(" · ")}</small>
+                        )}
+                      </span>
                       <span className="c-dur">{fmtDur(dur)}</span>
                       <span className="c-act">
                         <button className="pl-mini" title="Load & play" onClick={() => onLoad(i)}>▶</button>
@@ -624,11 +755,15 @@ function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, canRep
                 <button className="pl-action" onClick={onShuffle} disabled={files.length < 2}>SHUFFLE</button>
                 <button className="pl-action" onClick={openSavePrompt} disabled={files.length === 0}>SAVE</button>
                 <button className="pl-action" onClick={openLoadView}>LOAD…</button>
+                <label className="pl-action rekordbox-action" title="Import playlist order from a Rekordbox XML export">
+                  REKORDBOX XML
+                  <input type="file" className="hidden" accept=".xml,text/xml,application/xml" onChange={onRekordboxInput} />
+                </label>
                 <button className="pl-action danger" onClick={onClear} disabled={files.length === 0}>CLEAR</button>
                 <span className="pl-footer-hint">Drop audio files · 2× click row to load · ESC closes</span>
               </div>
             </React.Fragment>
-          ) : (
+          ) : view === "saved" ? (
             // === SAVED PLAYLISTS VIEW ===
             <div className="pl-saved">
               {!reconcile ? (
@@ -705,6 +840,7 @@ function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, canRep
                         <div className="pl-list-head">
                           <span className="c-num">#</span>
                           <span className="c-state"></span>
+                          <span className="c-art"></span>
                           <span className="c-name">EXPECTED</span>
                           <span className="c-dur">STATUS</span>
                           <span className="c-act"></span>
@@ -718,6 +854,7 @@ function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, canRep
                                 {found ? <span className="pl-playing" style={{ color: "#4ade80", animation: "none", textShadow: "none" }}>✓</span>
                                   : <span className="pl-cued" style={{ color: "#f59e0b" }}>?</span>}
                               </span>
+                              <span className="c-art"><span aria-hidden="true">♪</span></span>
                               <span className="c-name" title={name}>{name}</span>
                               <span className="c-dur" style={{ color: found ? "#4ade80" : "#f59e0b" }}>
                                 {found ? "FOUND" : "MISSING"}
@@ -750,6 +887,98 @@ function PlaylistModal({ open, deckKey, deckA, deckB, setDeckA, setDeckB, canRep
                   );
                 })()
               )}
+            </div>
+          ) : (
+            // === REKORDBOX XML VIEW ===
+            <div className="pl-rekordbox">
+              <div className="pl-saved-head">
+                <span className="pl-saved-title">Rekordbox XML</span>
+                <span className="pl-saved-count">
+                  {rekordboxImport?.sourceName || "No XML selected"}
+                </span>
+                <label className="pl-action" style={{ marginLeft: "auto" }}>
+                  CHOOSE OTHER XML
+                  <input type="file" className="hidden" accept=".xml,text/xml,application/xml" onChange={onRekordboxInput} />
+                </label>
+              </div>
+              <div className="rb-browser">
+                <div className="rb-playlists" aria-label="Rekordbox playlists">
+                  {(rekordboxImport?.playlists || []).map((playlist) => (
+                    <button key={playlist.path}
+                      className={selectedRekordbox?.path === playlist.path ? "active" : ""}
+                      onClick={() => setRekordboxImport((current) => ({
+                        ...current,
+                        selectedPath: playlist.path,
+                      }))}>
+                      <span>{playlist.name}</span>
+                      <small>{playlist.tracks.length} tracks · {playlist.path}</small>
+                    </button>
+                  ))}
+                </div>
+                <div className="rb-detail">
+                  {selectedRekordbox ? (
+                    <React.Fragment>
+                      <div className="rb-detail-head">
+                        <div>
+                          <strong>{selectedRekordbox.name}</strong>
+                          <span>{selectedRekordbox.path}</span>
+                        </div>
+                        <span className="rb-match-count">
+                          {rekordboxLoadedMatch.ordered.length}/{selectedRekordbox.tracks.length} LOADED
+                        </span>
+                      </div>
+                      <div className="rb-track-preview">
+                        {selectedRekordbox.tracks.map((track, index) => (
+                          <div key={`${track.id}-${index}`}>
+                            <span>{String(index + 1).padStart(2, "0")}</span>
+                            <div>
+                              <b>{track.name || track.fileName}</b>
+                              <small>{[track.artist, track.album].filter(Boolean).join(" · ") || track.fileName}</small>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="rb-actions">
+                        <button className="pl-action primary"
+                          disabled={!rekordboxLoadedMatch.ordered.length}
+                          onClick={() => applyRekordboxOrder(engDeck?.playlist || [])}>
+                          APPLY TO LOADED ({rekordboxLoadedMatch.ordered.length})
+                        </button>
+                        <label className="pl-action">
+                          SELECT AUDIO FILES
+                          <input type="file" className="hidden" accept="audio/*" multiple
+                            onChange={(event) => {
+                              applyRekordboxOrder(event.target.files);
+                              event.target.value = "";
+                            }} />
+                        </label>
+                        <label className="pl-action">
+                          SELECT MUSIC FOLDER
+                          <input type="file" className="hidden" accept="audio/*" multiple
+                            webkitdirectory="" directory=""
+                            onChange={(event) => {
+                              applyRekordboxOrder(event.target.files);
+                              event.target.value = "";
+                            }} />
+                        </label>
+                      </div>
+                      <p className="rb-help">
+                        Dubnator matches Rekordbox locations to local filenames, restores this exact order,
+                        and keeps the audio on your device. Missing tracks are reported but do not block the import.
+                      </p>
+                    </React.Fragment>
+                  ) : (
+                    <div className="pl-empty">
+                      <div className="pl-empty-icon">⌁</div>
+                      <div className="pl-empty-title">Choose a Rekordbox playlist</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="pl-footer">
+                <button className="pl-action" onClick={() => setView("list")}>← BACK TO {label}</button>
+                <span className="pl-footer-hint">XML restores playlist order · audio files are matched locally</span>
+              </div>
             </div>
           )}
 

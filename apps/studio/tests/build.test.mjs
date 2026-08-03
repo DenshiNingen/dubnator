@@ -24,6 +24,8 @@ test("production HTML uses only local runtime assets", () => {
   assert.doesNotMatch(html, /type="text\/babel"/);
   assert.equal([...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>/g)].length, 0);
   assert.match(html, /vendor\/react\.min\.js/);
+  assert.match(html, /track-metadata\.js\?v=[a-f0-9]{8}/);
+  assert.match(html, /rekordbox\.js\?v=[a-f0-9]{8}/);
   assert.match(html, /audio-codecs\.js\?v=[a-f0-9]{8}/);
 });
 
@@ -33,6 +35,8 @@ test("installed mobile app supports both portrait and landscape", () => {
 
 test("compatibility globals load before their consumers", () => {
   const ordered = [
+    "track-metadata.js",
+    "rekordbox.js",
     "audio-codecs.js",
     "audio-engine.js",
     "midi.js",
