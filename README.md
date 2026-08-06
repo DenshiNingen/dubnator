@@ -90,8 +90,10 @@ Programmer Mode automatically, and restores Live Mode when the app closes.
   plugging each one in, then select a different pad in the top two rows.
 - In the native app, the controllers are detected automatically. In the browser,
   open **MIDI → Enable MIDI** once to grant Web MIDI + SysEx access.
-- The first unit is **MIX / DECKS / INPUTS / ISOLATOR / SIREN / MASTER**; the
-  second is **ECHO / REVERB / FILTER / SAMPLES / ADVANCED ISOLATOR / EQ**.
+- With two units, the left controller exposes **MIX / DECKS / INPUTS / ISOLATOR /
+  SIREN / SAMPLES**, while the right controller exposes **ECHO / REVERB / FILTER /
+  MASTER / ADVANCED ISOLATOR / EQ**. The two surfaces stay synchronized with the
+  active page in the app and in Help.
 - With one unit, hold the physical top-row **←** button for the MIX surface or
   **→** for the FX surface. A short press still selects that button's normal page,
   so all 16 pages remain directly accessible.
