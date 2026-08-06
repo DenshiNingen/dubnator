@@ -106,3 +106,22 @@ test("artwork, shared playlists and Rekordbox ordering work together", async ({ 
   await expect(page.locator(".pl-deck-tab").nth(0)).toContainText("3");
   await expect(page.locator(".pl-deck-tab").nth(1)).toContainText("2");
 });
+
+test("restores a local deck playlist after a reload", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-wide", "one persistence pass is sufficient");
+  await page.goto("/");
+  await page.locator("body").click({ position: { x: 20, y: 20 } });
+  await page.keyboard.press("Space");
+  await expect(page.locator(".playlist-modal")).toBeVisible();
+
+  const track = wavFile("Persisted Dub.wav", "Persisted Dub", [180, 80, 220]);
+  await page.locator('.playlist-modal input[type="file"][accept="audio/*"][multiple]').first()
+    .setInputFiles(track);
+  await expect(page.locator(".pl-row .c-name b")).toHaveText("Persisted Dub");
+
+  await page.reload();
+  await page.locator("body").click({ position: { x: 20, y: 20 } });
+  await page.keyboard.press("Space");
+  await expect(page.locator(".playlist-modal")).toBeVisible();
+  await expect(page.locator(".pl-row .c-name b")).toHaveText("Persisted Dub");
+});
