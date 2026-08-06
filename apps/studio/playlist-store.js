@@ -47,6 +47,16 @@
   function clear(deck) {
     return transaction(deck, "readwrite", (store, key) => store.delete(key));
   }
+  function clearAll() {
+    return open().then((db) => new Promise((resolve) => {
+      if (!db) { resolve(null); return; }
+      try {
+        const request = db.transaction(STORE, "readwrite").objectStore(STORE).clear();
+        request.onsuccess = () => resolve(true);
+        request.onerror = () => resolve(null);
+      } catch (_) { resolve(null); }
+    }));
+  }
 
-  scope.DubnatorPlaylistStore = { save, load, clear };
+  scope.DubnatorPlaylistStore = { save, load, clear, clearAll };
 })(typeof window !== "undefined" ? window : self);

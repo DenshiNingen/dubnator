@@ -2311,6 +2311,13 @@ function App() {
     try { localStorage.setItem(PLAYLIST_LINK_KEY, playlistsLinked ? "1" : "0"); } catch (_) {}
   }, [playlistsLinked]);
 
+  const clearSavedSession = () => {
+    const store = window.DubnatorPlaylistStore;
+    if (!store?.clearAll) return;
+    if (window.confirm && !window.confirm("Clear the locally saved deck session? Active decks will not change.")) return;
+    store.clearAll();
+  };
+
   const samePlaylistFile = (a, b) => a === b || !!(a && b
     && a.name === b.name
     && a.size === b.size
@@ -4125,6 +4132,14 @@ function App() {
                       </option>
                     ))}
                   </select>
+                  <button
+                    type="button"
+                    className="btn-xs btn"
+                    style={{ width: "100%", marginTop: 6 }}
+                    onClick={clearSavedSession}
+                    title="Delete locally persisted audio files for both decks">
+                    CLEAR SAVED SESSION
+                  </button>
                 </div>
               )}
             </div>

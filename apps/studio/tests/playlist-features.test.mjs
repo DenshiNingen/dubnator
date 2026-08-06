@@ -44,3 +44,10 @@ test("playlist rows expose a paused load action separately from load and play", 
   assert.match(playlist, /onClick=\{\(\) => onLoad\(i, false\)\}/);
   assert.match(playlist, /title="Load & play"/);
 });
+
+test("advanced mode exposes a safe control to clear persisted deck files", () => {
+  assert.match(app, /const clearSavedSession = \(\) =>/);
+  assert.match(app, /store\.clearAll\(\)/);
+  assert.match(app, /CLEAR SAVED SESSION/);
+  assert.match(app, /Active decks will not change/);
+});
