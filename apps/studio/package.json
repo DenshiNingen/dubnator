@@ -8,7 +8,7 @@
     "build": "node build.mjs",
     "dev": "node build.mjs --serve",
     "pretest": "node build.mjs",
-    "test": "node --test tests/build.test.mjs tests/deck-end-mode.test.mjs tests/deck-load-lock.test.mjs tests/echo-performance.test.mjs tests/fx-colours.test.mjs tests/keyboard.test.mjs tests/launchpad.test.mjs tests/playlist-features.test.mjs tests/rekordbox.test.mjs tests/responsive.test.mjs tests/tap-tempo.test.mjs tests/track-metadata.test.mjs && node tests/engine.test.mjs && node tests/recorder.test.mjs && node tests/midi.test.mjs",
+    "test": "node --test tests/build.test.mjs tests/deck-end-mode.test.mjs tests/deck-load-lock.test.mjs tests/echo-performance.test.mjs tests/fx-colours.test.mjs tests/keyboard.test.mjs tests/launchpad.test.mjs tests/playlist-features.test.mjs tests/rekordbox.test.mjs tests/responsive.test.mjs tests/tap-tempo.test.mjs tests/track-metadata.test.mjs tests/waveform-worker.test.mjs && node tests/engine.test.mjs && node tests/recorder.test.mjs && node tests/midi.test.mjs",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:ui": "playwright test --ui",

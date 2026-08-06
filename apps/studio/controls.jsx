@@ -640,58 +640,42 @@ function DeckWaveform({
   const gridBpm = state.analysis?.bpm || bpm;
   const approximateTempo = state.analysis?.tempoSource === "audio";
   const gradientId = React.useId().replace(/:/g, "");
-  const paths = React.useMemo(() => {
+  const [waveEnvelope, setWaveEnvelope] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
     if (!buffer || !buffer.length) {
+      setWaveEnvelope(null);
+      return () => { cancelled = true; };
+    }
+    const columns = Math.min(6000, Math.max(720, Math.ceil(buffer.duration * 28)));
+    const source = new Float32Array(buffer.getChannelData(0));
+    const workerSource = source.slice();
+    // Reuse the versioned URL emitted into the document so the PWA cache and
+    // the worker always run the same waveform implementation offline.
+    const workerScript = [...document.scripts].find((script) => script.src.includes("waveform-worker.js"));
+    const workerUrl = workerScript?.src || new URL("waveform-worker.js", document.baseURI).href;
+    const apply = (result) => {
+      if (!cancelled && result?.body && result?.core) setWaveEnvelope(result);
+    };
+    if (typeof Worker === "function") {
+      const worker = new Worker(workerUrl);
+      worker.onmessage = (event) => { apply(event.data); worker.terminate(); };
+      worker.onerror = () => {
+        worker.terminate();
+        if (!cancelled) apply(window.DubnatorWaveform?.computeWaveformEnvelope(source, buffer.duration, gridBpm, columns));
+      };
+      worker.postMessage({ channel: workerSource, duration: buffer.duration, bpm: gridBpm, columns }, [workerSource.buffer]);
+      return () => { cancelled = true; worker.terminate(); };
+    }
+    apply(window.DubnatorWaveform?.computeWaveformEnvelope(source, buffer.duration, gridBpm, columns));
+    return () => { cancelled = true; };
+  }, [buffer, gridBpm]);
+  const paths = React.useMemo(() => {
+    if (!buffer || !buffer.length || !waveEnvelope) {
       return { body: "", core: "", outline: "", beats: "", bars: "" };
     }
-    // Keep enough horizontal detail for a CDJ-style close zoom. A fixed
-    // 360-column overview becomes a handful of crude bars when a long track is
-    // viewed in a 2–4 second window; duration-scaled sampling stays detailed.
-    const columns = Math.min(6000, Math.max(720, Math.ceil(buffer.duration * 28)));
-    const channel = buffer.getChannelData(0);
-    const peaks = new Float32Array(columns);
-    const rmsLevels = new Float32Array(columns);
-    for (let column = 0; column < columns; column++) {
-      const start = Math.floor((column / columns) * channel.length);
-      const end = Math.max(start + 1, Math.floor(((column + 1) / columns) * channel.length));
-      const stride = Math.max(1, Math.floor((end - start) / 72));
-      let peak = 0;
-      let squares = 0;
-      let samples = 0;
-      for (let sample = start; sample < end; sample += stride) {
-        const value = channel[sample] || 0;
-        peak = Math.max(peak, Math.abs(value));
-        squares += value * value;
-        samples++;
-      }
-      peaks[column] = peak;
-      rmsLevels[column] = samples ? Math.sqrt(squares / samples) : 0;
-    }
-
-    // Percentile normalization stops one rogue transient from making the rest
-    // of the track look flat. The peak envelope retains transients while the
-    // RMS core gives the waveform a solid, readable body.
-    const percentile = (values, ratio) => {
-      const sorted = Array.from(values).sort((a, b) => a - b);
-      return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * ratio))] || 0;
-    };
-    const peakScale = 42 / Math.max(0.0001, percentile(peaks, 0.985));
-    const rmsScale = 28 / Math.max(0.0001, percentile(rmsLevels, 0.96));
-    const body = new Float32Array(columns);
-    const core = new Float32Array(columns);
-    for (let column = 0; column < columns; column++) {
-      const previous = peaks[Math.max(0, column - 1)];
-      const next = peaks[Math.min(columns - 1, column + 1)];
-      const localPeak = Math.max(
-        peaks[column] * 0.88,
-        (previous + peaks[column] * 2 + next) * 0.25,
-      );
-      body[column] = Math.max(0.9, Math.min(47, localPeak * peakScale));
-      core[column] = Math.max(
-        0.55,
-        Math.min(body[column] * 0.88, rmsLevels[column] * rmsScale),
-      );
-    }
+    const { body, core } = waveEnvelope;
+    const columns = body.length;
 
     const areaPath = (amplitudes) => {
       let path = "";
@@ -717,17 +701,10 @@ function DeckWaveform({
       outline += `${column === columns - 1 ? "M" : "L"}${x.toFixed(2)} ${(50 + body[column]).toFixed(2)}`;
     }
 
-    const beatSeconds = 60 / Math.max(20, Math.min(400, gridBpm || 120));
-    const totalBeats = Math.floor(buffer.duration / beatSeconds);
-    const beatStride = Math.max(1, Math.ceil(totalBeats / 480));
     let beats = "";
     let bars = "";
-    for (let beat = 0; beat <= totalBeats; beat += beatStride) {
-      const x = ((beat * beatSeconds) / buffer.duration) * 1000;
-      const segment = `M${x.toFixed(2)} 0V100`;
-      if (beat % 4 === 0) bars += segment;
-      else beats += segment;
-    }
+    for (const fraction of waveEnvelope.beats || []) beats += `M${(fraction * 1000).toFixed(2)} 0V100`;
+    for (const fraction of waveEnvelope.bars || []) bars += `M${(fraction * 1000).toFixed(2)} 0V100`;
     return {
       body: areaPath(body),
       core: areaPath(core),
@@ -735,7 +712,7 @@ function DeckWaveform({
       beats,
       bars,
     };
-  }, [buffer, gridBpm]);
+  }, [buffer, waveEnvelope]);
 
   const visibleDuration = windowSeconds > 0 && duration > 0
     ? Math.min(duration, windowSeconds)

@@ -49,6 +49,7 @@ const STATIC_FILES = [
   "midi.js",
   "midi-controls.js",
   "tap-tempo.js",
+  "waveform-worker.js",
   "register-sw.js",
   "styles.css",
 ];
@@ -60,7 +61,7 @@ const VENDOR_MAP = {
 
 async function rewriteHtml() {
   const src = await readFile(join(ROOT, "Dubnator.html"), "utf8");
-  const [cssV, metadataV, rekordboxV, codecsV, audioV, bootstrapV, launchpadV, midiV, midiControlsV, tapTempoV, registerSwV] = await Promise.all([
+  const [cssV, metadataV, rekordboxV, codecsV, audioV, bootstrapV, launchpadV, midiV, midiControlsV, tapTempoV, waveformWorkerV, registerSwV] = await Promise.all([
     assetHash("styles.css"),
     assetHash("track-metadata.js"),
     assetHash("rekordbox.js"),
@@ -71,6 +72,7 @@ async function rewriteHtml() {
     assetHash("midi.js"),
     assetHash("midi-controls.js"),
     assetHash("tap-tempo.js"),
+    assetHash("waveform-worker.js"),
     assetHash("register-sw.js"),
   ]);
   // Compiled JS lives in DIST (esbuild output), so hash those, not the .jsx.
@@ -90,6 +92,7 @@ async function rewriteHtml() {
     .replaceAll("midi.js?v=0", `midi.js?v=${midiV}`)
     .replaceAll("midi-controls.js?v=0", `midi-controls.js?v=${midiControlsV}`)
     .replaceAll("tap-tempo.js?v=0", `tap-tempo.js?v=${tapTempoV}`);
+  out = out.replaceAll("waveform-worker.js?v=0", `waveform-worker.js?v=${waveformWorkerV}`);
   for (const entry of JSX_ENTRIES) {
     const name = entry.replace(/\.jsx$/, "");
     out = out.replaceAll(`${name}.js?v=0`, `${name}.js?v=${jsHashes[name]}`);
@@ -119,6 +122,7 @@ async function rewriteHtml() {
     `midi.js?v=${midiV}`,
     `midi-controls.js?v=${midiControlsV}`,
     `tap-tempo.js?v=${tapTempoV}`,
+    `waveform-worker.js?v=${waveformWorkerV}`,
     `register-sw.js?v=${registerSwV}`,
     ...JSX_ENTRIES.map((entry) => {
       const name = entry.replace(/\.jsx$/, "");
