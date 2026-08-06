@@ -1,5 +1,5 @@
 /* global React, ReactDOM, Knob, VSlider, Meter, EQCurve, LED, Crossfader, DeckWaveform */
-const { useState, useEffect, useRef, useCallback, useMemo } = React;
+const { useState, useEffect, useRef, useCallback, useMemo, useSyncExternalStore } = React;
 
 const FREQS_10 = [32, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 const ECHO_DIVS = ["1/4", "1/4.", "1/4t", "1/8", "1/8.", "1/8t", "1/16", "1/16t"];
@@ -10,6 +10,29 @@ const PLAYLIST_LINK_KEY = "dubnator.playlists.linked.v1";
 const METER_FRAME_MS = 1000 / 30;
 const deckEndModeFromValue = (value) => value < 0.25 ? "stop" : value < 0.75 ? "loop" : "next";
 const deckEndModeValue = (mode) => mode === "next" ? 1 : mode === "loop" ? 0.5 : 0;
+
+// High-frequency deck transport data has its own tiny external store. Keeping
+// playhead updates out of the main App state prevents the whole rack from
+// reconciling 30 times per second; only the expanded deck view subscribes.
+const deckTelemetrySnapshots = {
+  A: Object.freeze({ time: 0, dur: 0, playing: false, cued: false }),
+  B: Object.freeze({ time: 0, dur: 0, playing: false, cued: false }),
+};
+const deckTelemetryListeners = { A: new Set(), B: new Set() };
+function publishDeckTelemetry(deckKey, next) {
+  const previous = deckTelemetrySnapshots[deckKey];
+  if (previous && previous.time === next.time && previous.dur === next.dur
+    && previous.playing === next.playing && previous.cued === next.cued) return;
+  deckTelemetrySnapshots[deckKey] = Object.freeze(next);
+  deckTelemetryListeners[deckKey].forEach((listener) => listener());
+}
+function useDeckTelemetry(deckKey) {
+  return useSyncExternalStore(
+    (listener) => { deckTelemetryListeners[deckKey].add(listener); return () => deckTelemetryListeners[deckKey].delete(listener); },
+    () => deckTelemetrySnapshots[deckKey],
+    () => deckTelemetrySnapshots[deckKey],
+  );
+}
 // A restrained performance starting point: tempo-related repeats, less low-end
 // build-up and a dark enough loop to sit behind the source instead of masking it.
 const DUB_ECHO_START = Object.freeze({
@@ -173,7 +196,9 @@ function deckDisplayName(state, emptyLabel) {
 function DeckStrip({ label, state, set, meter, play, stop, onFile, deck, onPrev, onNext, onRewind, onSetCue, onJumpCue, bpm = 120, onOpenPlaylist, dropProps, dropActive, midiPrefix }) {
   const [more, setMore] = useState(false); // collapse RWD/PAN · A-G · loop controls
   const [analyzing, setAnalyzing] = useState(false);
-  const deckBpm = state.analysis?.bpm || bpm;
+  const telemetry = useDeckTelemetry(label.endsWith("A") ? "A" : "B");
+  const liveState = { ...state, ...telemetry };
+  const deckBpm = liveState.analysis?.bpm || bpm;
   const analyzeTrack = async () => {
     const currentDeck = deck();
     if (!currentDeck?.buffer || !currentDeck.analyze || analyzing) return;
@@ -244,7 +269,7 @@ function DeckStrip({ label, state, set, meter, play, stop, onFile, deck, onPrev,
       <div className="deck-transport-block">
         <div className="row">
           <button className="transport-btn" onClick={onPrev} title="Previous track">⏮</button>
-          <button className={`transport-btn ${state.playing ? "lit" : ""}`} onClick={play} title="Play / Pause">{state.playing ? "❚❚" : "▶"}</button>
+          <button className={`transport-btn ${liveState.playing ? "lit" : ""}`} onClick={play} title="Play / Pause">{liveState.playing ? "❚❚" : "▶"}</button>
           <button className="transport-btn" onClick={onNext} title="Next track">⏭</button>
         </div>
         <div className="row">
@@ -252,7 +277,7 @@ function DeckStrip({ label, state, set, meter, play, stop, onFile, deck, onPrev,
           <button className="transport-btn wide" onClick={onRewind} title={`Rewind ${state.rewindLen.toFixed(1)}s`}>◀◀</button>
         </div>
         <div className="row">
-          <button className={`transport-btn wide ${state.cued ? "lit" : ""}`} onClick={onSetCue} title="Set hot-cue at the playhead">CUE</button>
+          <button className={`transport-btn wide ${liveState.cued ? "lit" : ""}`} onClick={onSetCue} title="Set hot-cue at the playhead">CUE</button>
           <button className="transport-btn wide" onClick={onJumpCue} title="Jump to the hot-cue">→CUE</button>
         </div>
       </div>
@@ -336,6 +361,8 @@ function DeckFocusCard({
   onJumpCue,
 }) {
   const [analyzing, setAnalyzing] = useState(false);
+  const telemetry = useDeckTelemetry(label);
+  const liveState = { ...state, ...telemetry };
   const minZoomSeconds = 2;
   const maxZoomSeconds = 120;
   const [zoomSeconds, setZoomSeconds] = useState(16);
@@ -363,7 +390,7 @@ function DeckFocusCard({
     ? `${zoomSeconds.toFixed(1)}s`
     : `${Math.round(zoomSeconds)}s`;
   const hasTrack = !!engineDeck?.buffer;
-  const hasPlaylistNavigation = (state.playlist?.length || 0) > 1;
+  const hasPlaylistNavigation = (liveState.playlist?.length || 0) > 1;
   const runAnalysis = async () => {
     if (!engineDeck?.buffer || !engineDeck.analyze || analyzing) return;
     setAnalyzing(true);
@@ -433,11 +460,11 @@ function DeckFocusCard({
         <div className="deck-focus-track">
           <strong>{deckDisplayName(state, `Deck ${label} empty`)}</strong>
           <span className="mono">
-            {state.metadata?.artist ? `${state.metadata.artist} · ` : ""}
-            {state.analysis?.bpm
-              ? `${state.analysis.tempoSource === "audio" ? "≈" : ""}${state.analysis.bpm} BPM`
+            {liveState.metadata?.artist ? `${liveState.metadata.artist} · ` : ""}
+            {liveState.analysis?.bpm
+              ? `${liveState.analysis.tempoSource === "audio" ? "≈" : ""}${liveState.analysis.bpm} BPM`
               : `GRID ${Math.round(bpm)} BPM`}
-            {state.analysis?.key ? ` · ~${state.analysis.key}` : ""}
+            {liveState.analysis?.key ? ` · ~${liveState.analysis.key}` : ""}
           </span>
         </div>
         <button className="btn-xs btn" onClick={runAnalysis}
@@ -448,15 +475,15 @@ function DeckFocusCard({
       </header>
 
       <div className="deck-focus-clock mono">
-        <strong>{fmtTime(state.time)}</strong>
-        <span>{fmtTime(state.dur)}</span>
+        <strong>{fmtTime(liveState.time)}</strong>
+        <span>{fmtTime(liveState.dur)}</span>
       </div>
       <div className="deck-focus-overview-stage">
         <TrackArtwork metadata={state.metadata} className="deck-focus-cover"
           label={`Artwork for ${deckDisplayName(state, `Deck ${label}`)}`} />
         <div className="deck-focus-overview">
           <span className="deck-focus-wave-label mono">OVERVIEW</span>
-          <DeckWaveform engineDeck={engineDeck} state={state} bpm={bpm} label={label} showTempo={false} />
+          <DeckWaveform engineDeck={engineDeck} state={liveState} bpm={bpm} label={label} showTempo={false} />
         </div>
       </div>
       <div className="deck-focus-wave deck-focus-detail">
@@ -481,9 +508,9 @@ function DeckFocusCard({
             disabled={zoomSeconds <= minZoomSeconds}
             aria-label={`Zoom in Deck ${label} waveform`} title="Zoom in waveform">+</button>
         </div>
-        <DeckWaveform
+          <DeckWaveform
           engineDeck={engineDeck}
-          state={state}
+          state={liveState}
           bpm={bpm}
           label={label}
           windowSeconds={zoomSeconds}
@@ -497,10 +524,10 @@ function DeckFocusCard({
             aria-label={`Previous track on Deck ${label}`} title="Previous playlist track">
             <b>│◀</b><small>PREV</small>
           </button>
-          <button className={`btn deck-focus-play ${state.playing ? "active" : ""}`}
+          <button className={`btn deck-focus-play ${liveState.playing ? "active" : ""}`}
             onClick={onPlay} disabled={!hasTrack}
-            aria-label={`${state.playing ? "Pause" : "Play"} Deck ${label}`} title="Play or pause">
-            <b>{state.playing ? "Ⅱ" : "▶"}</b><small>{state.playing ? "PAUSE" : "PLAY"}</small>
+            aria-label={`${liveState.playing ? "Pause" : "Play"} Deck ${label}`} title="Play or pause">
+            <b>{liveState.playing ? "Ⅱ" : "▶"}</b><small>{liveState.playing ? "PAUSE" : "PLAY"}</small>
           </button>
           <button className="btn" onClick={onNext} disabled={!hasPlaylistNavigation}
             aria-label={`Next track on Deck ${label}`} title="Next playlist track">
@@ -516,12 +543,12 @@ function DeckFocusCard({
           </button>
         </div>
         <div className="deck-focus-control-group" aria-label={`Deck ${label} cue controls`}>
-          <button className={`btn deck-focus-cue ${state.cued ? "active" : ""}`}
+          <button className={`btn deck-focus-cue ${liveState.cued ? "active" : ""}`}
             onClick={onSetCue} disabled={!hasTrack}
-            aria-label={`Set cue on Deck ${label}`} aria-pressed={state.cued}>
+            aria-label={`Set cue on Deck ${label}`} aria-pressed={liveState.cued}>
             <b>●</b><small>SET CUE</small>
           </button>
-          <button className="btn deck-focus-cue" onClick={onJumpCue} disabled={!state.cued}
+          <button className="btn deck-focus-cue" onClick={onJumpCue} disabled={!liveState.cued}
             aria-label={`Jump to cue on Deck ${label}`}>
             <b>CUE ▶</b><small>RETURN</small>
           </button>
@@ -599,6 +626,25 @@ function DeckFocusView({
       </div>
     </div>,
     document.body,
+  );
+}
+
+function DeckTransportRow({ label, state, engineDeck, bpm }) {
+  const telemetry = useDeckTelemetry(label);
+  const liveState = { ...state, ...telemetry };
+  return (
+    <div className="transport-deck-row">
+      <TrackArtwork metadata={liveState.metadata} className="td-art"
+        label={`Artwork for ${deckDisplayName(liveState, `Deck ${label}`)}`} />
+      <div className="td-time mono">{fmtTime(liveState.time)}</div>
+      <div className="td-time-sub mono">{fmtTime(liveState.dur)}</div>
+      <div className="td-track">
+        <span className="td-track-name">
+          {deckDisplayName(liveState, `${label === "A" ? "1" : "2"} Empty`)}
+        </span>
+        <DeckWaveform engineDeck={engineDeck} state={liveState} bpm={bpm} label={label} />
+      </div>
+    </div>
   );
 }
 
@@ -1155,9 +1201,17 @@ function App() {
         setSourceLevels((previous) => Object.keys(next).some((key) => Math.abs(previous[key] - next[key]) >= 0.012) ? next : previous);
       }
       if (eng.getLimiterReduction) updateMeter(setGr, eng.getLimiterReduction(), 0.02);
-      // deck times
-      setDeckA((s) => ({ ...s, time: eng.deckA.getCurrentTime(), dur: eng.deckA.getDuration(), name: eng.deckA.name, playing: eng.deckA.playing, cued: eng.deckA.hasCue(), analysis: eng.deckA.analysis, metadata: eng.deckA.metadata || {} }));
-      setDeckB((s) => ({ ...s, time: eng.deckB.getCurrentTime(), dur: eng.deckB.getDuration(), name: eng.deckB.name, playing: eng.deckB.playing, cued: eng.deckB.hasCue(), analysis: eng.deckB.analysis, metadata: eng.deckB.metadata || {} }));
+      // High-frequency transport data bypasses App state; the expanded deck
+      // view subscribes to this small store while the rest of the rack stays
+      // out of the reconciliation path.
+      publishDeckTelemetry("A", {
+        time: eng.deckA.getCurrentTime(), dur: eng.deckA.getDuration(),
+        playing: eng.deckA.playing, cued: eng.deckA.hasCue(),
+      });
+      publishDeckTelemetry("B", {
+        time: eng.deckB.getCurrentTime(), dur: eng.deckB.getDuration(),
+        playing: eng.deckB.playing, cued: eng.deckB.hasCue(),
+      });
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
@@ -3225,23 +3279,8 @@ function App() {
             <small>{playlistsLinked ? "SHARED" : "SEPARATE"}</small>
           </button>
           <div className="transport-decks">
-            {[
-              { label: "A", state: deckA, deck: () => eng.deckA },
-              { label: "B", state: deckB, deck: () => eng.deckB },
-            ].map(({ label, state, deck }) => (
-              <div key={label} className="transport-deck-row">
-                <TrackArtwork metadata={state.metadata} className="td-art"
-                  label={`Artwork for ${deckDisplayName(state, `Deck ${label}`)}`} />
-                <div className="td-time mono">{fmtTime(state.time)}</div>
-                <div className="td-time-sub mono">{fmtTime(state.dur)}</div>
-                <div className="td-track">
-                  <span className="td-track-name">
-                    {deckDisplayName(state, `${label === "A" ? "1" : "2"} Empty`)}
-                  </span>
-                  <DeckWaveform engineDeck={ready ? deck() : null} state={state} bpm={echo.bpm} label={label} />
-                </div>
-              </div>
-            ))}
+            <DeckTransportRow label="A" state={deckA} engineDeck={ready ? eng.deckA : null} bpm={echo.bpm} />
+            <DeckTransportRow label="B" state={deckB} engineDeck={ready ? eng.deckB : null} bpm={echo.bpm} />
           </div>
           <div className="transport-decks-label mono">DECKS</div>
         </div>

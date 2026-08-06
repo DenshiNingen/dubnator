@@ -61,7 +61,7 @@ test("custom touch controls cancel safely and expose keyboard slider semantics",
   assert.match(app, /className="setup-tabs" role="tablist"/);
   assert.match(app, /aria-label="Music reverb send" aria-pressed=/);
   assert.match(app, /role="button" tabIndex=\{0\}/);
-  assert.match(app, /<DeckWaveform engineDeck=\{ready \? deck\(\) : null\}/);
+  assert.match(app, /<DeckWaveform engineDeck=\{(?:ready \? deck\(\) : null|engineDeck)/);
   assert.match(controls, /function DeckWaveform\(/);
   assert.match(controls, /aria-label=\{`Deck \$\{label\} \$\{windowSeconds > 0 \? "detailed " : ""\}waveform playhead`\}/);
   assert.match(css, /\.deck-waveform-loop\s*\{/);
@@ -118,7 +118,7 @@ test("deck transport expands into synchronized single and double performance vie
   assert.match(app, /aria-label=\{`Zoom in Deck \$\{label\} waveform`\}/);
   assert.match(app, /aria-label=\{`Deck \$\{label\} waveform zoom`\}/);
   assert.match(app, /Math\.exp\(Math\.max\(-120, Math\.min\(120, input\)\) \* 0\.0015\)/);
-  assert.match(app, /aria-label=\{`\$\{state\.playing \? "Pause" : "Play"\} Deck \$\{label\}`\}/);
+  assert.match(app, /aria-label=\{`\$\{(?:state|liveState)\.playing \? "Pause" : "Play"\} Deck \$\{label\}`\}/);
   assert.match(app, /aria-label=\{`Rewind Deck \$\{label\}`\}/);
   assert.match(app, /aria-label=\{`Halve loop on Deck \$\{label\}`\}/);
   assert.match(app, /aria-label=\{`Double loop on Deck \$\{label\}`\}/);
