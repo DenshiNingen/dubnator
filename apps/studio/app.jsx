@@ -1119,32 +1119,42 @@ function App() {
         }
         return Math.sqrt(s / data.length);
       };
-      setMeterA(Math.min(1, rms(dataA) * 3));
-      setMeterB(Math.min(1, rms(dataB) * 3));
-      setMeterMaster(Math.min(1, rms(dataM) * 3));
+      const updateMeter = (setter, next, epsilon = 0.012) => {
+        setter((previous) => Math.abs(previous - next) < epsilon ? previous : next);
+      };
+      updateMeter(setMeterA, Math.min(1, rms(dataA) * 3));
+      updateMeter(setMeterB, Math.min(1, rms(dataB) * 3));
+      updateMeter(setMeterMaster, Math.min(1, rms(dataM) * 3));
       // master peak (dBFS) with a slow decay for a readable peak-hold number
       let mpk = 0;
       for (let i = 0; i < dataM.length; i++) { const a = Math.abs((dataM[i] - 128) / 128); if (a > mpk) mpk = a; }
       const mpkDb = mpk > 0.0001 ? 20 * Math.log10(mpk) : -Infinity;
-      setMasterPeakDb((prev) => { const decayed = (isFinite(prev) ? prev : -120) - 0.6; return mpkDb > decayed ? mpkDb : decayed; });
+      setMasterPeakDb((prev) => {
+        const decayed = (isFinite(prev) ? prev : -120) - 0.6;
+        const next = mpkDb > decayed ? mpkDb : decayed;
+        return Math.abs(next - prev) < 0.35 ? prev : next;
+      });
       if (eng.getBandLevels) {
         const bl = eng.getBandLevels();
-        setBandLevels({ sub: Math.min(1, bl.sub * 4), bass: Math.min(1, bl.bass * 4), mid: Math.min(1, bl.mid * 4), high: Math.min(1, bl.high * 4), top: Math.min(1, bl.top * 4) });
+        const next = { sub: Math.min(1, bl.sub * 4), bass: Math.min(1, bl.bass * 4), mid: Math.min(1, bl.mid * 4), high: Math.min(1, bl.high * 4), top: Math.min(1, bl.top * 4) };
+        setBandLevels((previous) => Object.keys(next).some((key) => Math.abs(previous[key] - next[key]) >= 0.012) ? next : previous);
       }
       if (eng.getInputLevels) {
         const il = eng.getInputLevels();
-        setInLevels({ in1: Math.min(1, il.in1 * 3), in2: Math.min(1, il.in2 * 3), aux: Math.min(1, il.aux * 3) });
+        const next = { in1: Math.min(1, il.in1 * 3), in2: Math.min(1, il.in2 * 3), aux: Math.min(1, il.aux * 3) };
+        setInLevels((previous) => Object.keys(next).some((key) => Math.abs(previous[key] - next[key]) >= 0.012) ? next : previous);
       }
       if (eng.getSourceLevels) {
         const sl = eng.getSourceLevels();
-        setSourceLevels({
+        const next = {
           samples: Math.min(1, sl.samples * 3),
           siren: Math.min(1, sl.siren * 3),
           reverb: Math.min(1, sl.reverb * 3),
           echo: Math.min(1, sl.echo * 3),
-        });
+        };
+        setSourceLevels((previous) => Object.keys(next).some((key) => Math.abs(previous[key] - next[key]) >= 0.012) ? next : previous);
       }
-      if (eng.getLimiterReduction) setGr(eng.getLimiterReduction());
+      if (eng.getLimiterReduction) updateMeter(setGr, eng.getLimiterReduction(), 0.02);
       // deck times
       setDeckA((s) => ({ ...s, time: eng.deckA.getCurrentTime(), dur: eng.deckA.getDuration(), name: eng.deckA.name, playing: eng.deckA.playing, cued: eng.deckA.hasCue(), analysis: eng.deckA.analysis, metadata: eng.deckA.metadata || {} }));
       setDeckB((s) => ({ ...s, time: eng.deckB.getCurrentTime(), dur: eng.deckB.getDuration(), name: eng.deckB.name, playing: eng.deckB.playing, cued: eng.deckB.hasCue(), analysis: eng.deckB.analysis, metadata: eng.deckB.metadata || {} }));
