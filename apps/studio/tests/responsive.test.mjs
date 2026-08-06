@@ -72,6 +72,8 @@ test("custom touch controls cancel safely and expose keyboard slider semantics",
 
 test("visual feedback work pauses or throttles when it cannot help the user", () => {
   assert.match(app, /const METER_FRAME_MS = 1000 \/ 30/);
+  assert.match(app, /const METER_UI_FRAME_MS = 1000 \/ 20/);
+  assert.match(app, /now - lastUiFrame >= METER_UI_FRAME_MS/);
   assert.match(app, /document\.hidden \|\| now - lastFrame < METER_FRAME_MS/);
   assert.match(controls, /new IntersectionObserver/);
   assert.match(controls, /document\.addEventListener\("visibilitychange"/);

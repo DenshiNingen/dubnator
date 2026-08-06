@@ -8,6 +8,7 @@ const LAUNCHPAD_BRIGHTNESS_LEVELS = [0, 18, 36, 54, 73, 91, 109, 127];
 const LAUNCHPAD_BRIGHTNESS_KEY = "dubnator.launchpad.brightness.v1";
 const PLAYLIST_LINK_KEY = "dubnator.playlists.linked.v1";
 const METER_FRAME_MS = 1000 / 30;
+const METER_UI_FRAME_MS = 1000 / 20;
 const deckEndModeFromValue = (value) => value < 0.25 ? "stop" : value < 0.75 ? "loop" : "next";
 const deckEndModeValue = (mode) => mode === "next" ? 1 : mode === "loop" ? 0.5 : 0;
 
@@ -1147,6 +1148,7 @@ function App() {
     if (!ready) return;
     let raf;
     let lastFrame = 0;
+    let lastUiFrame = 0;
     const dataA = new Uint8Array(eng.deckA.analyser.fftSize);
     const dataB = new Uint8Array(eng.deckB.analyser.fftSize);
     const dataM = new Uint8Array(eng.masterAnalyser.fftSize);
@@ -1165,42 +1167,45 @@ function App() {
         }
         return Math.sqrt(s / data.length);
       };
-      const updateMeter = (setter, next, epsilon = 0.012) => {
-        setter((previous) => Math.abs(previous - next) < epsilon ? previous : next);
-      };
-      updateMeter(setMeterA, Math.min(1, rms(dataA) * 3));
-      updateMeter(setMeterB, Math.min(1, rms(dataB) * 3));
-      updateMeter(setMeterMaster, Math.min(1, rms(dataM) * 3));
-      // master peak (dBFS) with a slow decay for a readable peak-hold number
-      let mpk = 0;
-      for (let i = 0; i < dataM.length; i++) { const a = Math.abs((dataM[i] - 128) / 128); if (a > mpk) mpk = a; }
-      const mpkDb = mpk > 0.0001 ? 20 * Math.log10(mpk) : -Infinity;
-      setMasterPeakDb((prev) => {
-        const decayed = (isFinite(prev) ? prev : -120) - 0.6;
-        const next = mpkDb > decayed ? mpkDb : decayed;
-        return Math.abs(next - prev) < 0.35 ? prev : next;
-      });
-      if (eng.getBandLevels) {
-        const bl = eng.getBandLevels();
-        const next = { sub: Math.min(1, bl.sub * 4), bass: Math.min(1, bl.bass * 4), mid: Math.min(1, bl.mid * 4), high: Math.min(1, bl.high * 4), top: Math.min(1, bl.top * 4) };
-        setBandLevels((previous) => Object.keys(next).some((key) => Math.abs(previous[key] - next[key]) >= 0.012) ? next : previous);
-      }
-      if (eng.getInputLevels) {
-        const il = eng.getInputLevels();
-        const next = { in1: Math.min(1, il.in1 * 3), in2: Math.min(1, il.in2 * 3), aux: Math.min(1, il.aux * 3) };
-        setInLevels((previous) => Object.keys(next).some((key) => Math.abs(previous[key] - next[key]) >= 0.012) ? next : previous);
-      }
-      if (eng.getSourceLevels) {
-        const sl = eng.getSourceLevels();
-        const next = {
-          samples: Math.min(1, sl.samples * 3),
-          siren: Math.min(1, sl.siren * 3),
-          reverb: Math.min(1, sl.reverb * 3),
-          echo: Math.min(1, sl.echo * 3),
+      if (now - lastUiFrame >= METER_UI_FRAME_MS) {
+        lastUiFrame = now;
+        const updateMeter = (setter, next, epsilon = 0.012) => {
+          setter((previous) => Math.abs(previous - next) < epsilon ? previous : next);
         };
-        setSourceLevels((previous) => Object.keys(next).some((key) => Math.abs(previous[key] - next[key]) >= 0.012) ? next : previous);
+        updateMeter(setMeterA, Math.min(1, rms(dataA) * 3));
+        updateMeter(setMeterB, Math.min(1, rms(dataB) * 3));
+        updateMeter(setMeterMaster, Math.min(1, rms(dataM) * 3));
+        // master peak (dBFS) with a slow decay for a readable peak-hold number
+        let mpk = 0;
+        for (let i = 0; i < dataM.length; i++) { const a = Math.abs((dataM[i] - 128) / 128); if (a > mpk) mpk = a; }
+        const mpkDb = mpk > 0.0001 ? 20 * Math.log10(mpk) : -Infinity;
+        setMasterPeakDb((prev) => {
+          const decayed = (isFinite(prev) ? prev : -120) - 0.6;
+          const next = mpkDb > decayed ? mpkDb : decayed;
+          return Math.abs(next - prev) < 0.35 ? prev : next;
+        });
+        if (eng.getBandLevels) {
+          const bl = eng.getBandLevels();
+          const next = { sub: Math.min(1, bl.sub * 4), bass: Math.min(1, bl.bass * 4), mid: Math.min(1, bl.mid * 4), high: Math.min(1, bl.high * 4), top: Math.min(1, bl.top * 4) };
+          setBandLevels((previous) => Object.keys(next).some((key) => Math.abs(previous[key] - next[key]) >= 0.012) ? next : previous);
+        }
+        if (eng.getInputLevels) {
+          const il = eng.getInputLevels();
+          const next = { in1: Math.min(1, il.in1 * 3), in2: Math.min(1, il.in2 * 3), aux: Math.min(1, il.aux * 3) };
+          setInLevels((previous) => Object.keys(next).some((key) => Math.abs(previous[key] - next[key]) >= 0.012) ? next : previous);
+        }
+        if (eng.getSourceLevels) {
+          const sl = eng.getSourceLevels();
+          const next = {
+            samples: Math.min(1, sl.samples * 3),
+            siren: Math.min(1, sl.siren * 3),
+            reverb: Math.min(1, sl.reverb * 3),
+            echo: Math.min(1, sl.echo * 3),
+          };
+          setSourceLevels((previous) => Object.keys(next).some((key) => Math.abs(previous[key] - next[key]) >= 0.012) ? next : previous);
+        }
+        if (eng.getLimiterReduction) updateMeter(setGr, eng.getLimiterReduction(), 0.02);
       }
-      if (eng.getLimiterReduction) updateMeter(setGr, eng.getLimiterReduction(), 0.02);
       // High-frequency transport data bypasses App state; the expanded deck
       // view subscribes to this small store while the rest of the rack stays
       // out of the reconciliation path.
