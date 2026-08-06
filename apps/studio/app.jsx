@@ -2251,10 +2251,14 @@ function App() {
   // playheads and playlist indices. A mirror uses cloned arrays so unlinking is
   // immediate and later mutations cannot leak across decks.
   const syncLinkedPlaylist = (sourceKey, force = false) => {
-    if (!force && !playlistsLinked) return;
     const source = sourceKey === "B" ? eng.deckB : eng.deckA;
     const target = sourceKey === "B" ? eng.deckA : eng.deckB;
     if (!source || !target) return;
+    const store = window.DubnatorPlaylistStore;
+    // Persist the source even when the two decks are intentionally separate.
+    // IndexedDB is best-effort and never blocks a live playlist operation.
+    store?.save(sourceKey, source.playlist || []);
+    if (!force && !playlistsLinked) return;
     const targetCurrent = target.file || target.playlist?.[target.playlistIdx];
     target.playlist = [...(source.playlist || [])];
     const preservedIndex = targetCurrent
@@ -2275,7 +2279,43 @@ function App() {
       playlist: target.playlist.map((file) => file.name),
       playlistIdx: target.playlistIdx,
     }));
+    store?.save(sourceKey === "B" ? "A" : "B", target.playlist || []);
   };
+
+  // Restore the last local session once after the engine is ready. Existing
+  // user-loaded playlists always win, so a quick drag/drop immediately after
+  // launch cannot be overwritten by an asynchronous IndexedDB read.
+  const sessionRestoredRef = useRef(false);
+  useEffect(() => {
+    if (!ready || sessionRestoredRef.current) return;
+    sessionRestoredRef.current = true;
+    const store = window.DubnatorPlaylistStore;
+    if (!store) return;
+    const restoreDeck = async (deckKey) => {
+      const target = deckKey === "B" ? eng.deckB : eng.deckA;
+      const setDeck = deckKey === "B" ? setDeckB : setDeckA;
+      if (!target || target.playlist?.length) return false;
+      const files = await store.load(deckKey);
+      if (!files.length || target.playlist?.length) return false;
+      files.forEach((file) => target.addToPlaylist(file));
+      if (!target.buffer) {
+        try { await target.loadPlaylistIndex(0); } catch (_) {}
+      }
+      setDeck((state) => ({
+        ...state,
+        playlist: target.playlist.map((file) => file.name),
+        playlistIdx: target.playlistIdx || 0,
+        name: target.name || target.playlist[0]?.name || "—",
+        playing: false,
+      }));
+      return true;
+    };
+    (async () => {
+      const restoredA = await restoreDeck("A");
+      await restoreDeck("B");
+      if (restoredA && playlistsLinked) syncLinkedPlaylist("A", true);
+    })();
+  }, [ready]);
 
   const togglePlaylistLink = (next, preferredSource = activeDeck) => {
     const enabled = typeof next === "boolean" ? next : !playlistsLinked;
