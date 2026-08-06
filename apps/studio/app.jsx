@@ -1695,7 +1695,10 @@ function App() {
       };
       const attachPorts = (ports) => {
         const surface = launchpadRef.current;
-        if (surface) surface.setPorts(ports);
+        if (surface) {
+          surface.setPorts(ports);
+          surface.animateConnect();
+        }
       };
 
       // Desktop (Tauri): WKWebView/WebKitGTK have no Web MIDI, so controllers
@@ -2605,7 +2608,9 @@ function App() {
   useEffect(() => {
     if (!launchpadRef.current) return;
     const now = Date.now();
-    if (now - launchpadMeterFrameRef.current < 40) return;
+    // Keep hardware VU feedback fluid while the Launchpad manager de-duplicates
+    // unchanged frames. 40 Hz is responsive without flooding Web MIDI SysEx.
+    if (now - launchpadMeterFrameRef.current < 24) return;
     launchpadMeterFrameRef.current = now;
     const musicLevel = Math.max(
       bandLevels.sub,

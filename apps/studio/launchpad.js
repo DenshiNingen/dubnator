@@ -521,6 +521,7 @@
     setPorts({ inputs = [], outputs = [] } = {}) {
       this.restoreLiveMode();
       this.meterPeaks.clear();
+      this.stopConnectAnimation();
       const ins = inputs.filter(isLaunchpadMiniMk3Port).sort(portSort).slice(0, 2);
       const outs = outputs.filter(isLaunchpadMiniMk3Port).sort(portSort).slice(0, 2);
       this.devices = ins.map((input, index) => ({
@@ -541,7 +542,109 @@
       return this.getStatus();
     }
 
+    stopConnectAnimation() {
+      if (this.connectAnimationTimer !== null && this.connectAnimationTimer !== undefined) {
+        globalThis.clearTimeout(this.connectAnimationTimer);
+      }
+      this.connectAnimationTimer = null;
+      this.connectAnimationToken = (this.connectAnimationToken || 0) + 1;
+      this.animationActive = false;
+    }
+
+    // A short sound-system style boot animation. It writes the same batched
+    // Programmer Mode frame as normal feedback, so it works in Web MIDI and
+    // the native Tauri bridge without changing the active page or values.
+    animateConnect({ duration = 1500, stagger = 90 } = {}) {
+      const devices = this.devices.filter((device) => device.outputId);
+      if (!devices.length) return false;
+      this.stopConnectAnimation();
+      const token = this.connectAnimationToken;
+      const started = Date.now();
+      // 40 Hz feels much closer to a hardware light animation than the old
+      // ~24 Hz timer, while staying comfortably below Web MIDI's throughput
+      // ceiling for two 81-LED SysEx frames.
+      const frameMs = 24;
+      this.animationActive = true;
+
+      const colour = (progress, index, row, column) => {
+        const boot = Math.min(1, Math.max(0, progress));
+        const wave = boot * 9 - index * 0.8;
+        const rise = boot * 8 - (7 - row);
+        const distance = Math.abs(column - wave);
+        // Low-end sweep: red/orange wave rising from the bottom.
+        if (boot < 0.58 && rise > -1.2 && distance < 2.3) {
+          return distance < 0.65 ? PALETTES.yellow.bright : PALETTES.orange.bright;
+        }
+        // VU-style columns fill behind the echo sweep.
+        if (boot >= 0.2 && boot < 0.82 && rise > 0 && column % 2 === index % 2) {
+          return (7 - row) >= 6 ? PALETTES.red.dim : (7 - row) >= 4 ? PALETTES.yellow.bright : PALETTES.green.bright;
+        }
+        // Final dub echo: a cool pulse washes across the grid.
+        if (boot >= 0.72) {
+          const pulse = (boot - 0.72) / 0.28;
+          const edge = Math.abs(column - (pulse * 9 - index * 0.7));
+          if (edge < 1.5) return PALETTES.cyan.bright;
+          if (edge < 3.2) return PALETTES.violet.dim;
+        }
+        return 0;
+      };
+
+      const tick = () => {
+        if (token !== this.connectAnimationToken) return;
+        const elapsed = Date.now() - started;
+        let active = false;
+        devices.forEach((device, index) => {
+          const progress = (elapsed - index * stagger) / duration;
+          if (progress < 0) return;
+          if (progress <= 1) active = true;
+          const leds = new Map();
+          for (let row = 0; row < 8; row++) {
+            for (let column = 0; column < 8; column++) {
+              const value = colour(progress, index, row, column);
+              leds.set(orientedGridNote(device.orientation, row, column), value);
+            }
+          }
+          // Page buttons flicker like a sound-system status bank during boot.
+          for (let page = 0; page < 8; page++) {
+            const pageToneValue = page === device.page && progress < 1
+              ? PALETTES.green.bright
+              : progress > 0.78 && page % 2 === Math.floor(progress * 18) % 2
+                ? PALETTES.cyan.dim
+                : 0;
+            leds.set(orientedTopNote(device.orientation, page), pageToneValue);
+          }
+          leds.set(99, progress > 0.78 ? PALETTES.cyan.bright : PALETTES.green.dim);
+          for (let row = 0; row < 8; row++) {
+            const echoPosition = progress > 0.3 ? (progress * 12) + index * 2 : -10;
+            const echoDistance = Math.abs(row - (echoPosition % 9));
+            leds.set(
+              orientedSideNote(device.orientation, row),
+              echoDistance < 0.45
+                ? PALETTES.violet.bright
+                : echoDistance < 1.35 ? PALETTES.violet.dim : 0,
+            );
+          }
+          const ordered = [...leds.entries()].sort((a, b) => a[0] - b[0]);
+          const specs = ordered.flatMap(([note, value]) => [0, note, value]);
+          this.send(device.outputId, [...SYSEX, 0x03, ...specs, 0xf7]);
+        });
+        if (active) {
+          this.connectAnimationTimer = globalThis.setTimeout(tick, frameMs);
+        } else {
+          this.connectAnimationTimer = null;
+          this.animationActive = false;
+          devices.forEach((device) => {
+            device.lastFrame = "";
+            this.render(device, true);
+          });
+        }
+      };
+      tick();
+      return true;
+    }
+
     restoreLiveMode() {
+      this.stopConnectAnimation();
       for (const device of this.devices) {
         this._cancelRoleHold(device);
         this._releaseMomentaries(device, "disconnect");
@@ -985,6 +1088,7 @@
 
     render(device, force = false) {
       if (!device.outputId) return;
+      if (this.animationActive) return;
       const layout = this._layout(device);
       const leds = new Map();
 
