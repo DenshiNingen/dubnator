@@ -484,6 +484,8 @@
       this.meters = {};
       this.meterPeaks = new Map();
       this.devices = [];
+      this.portsSignature = "";
+      this.lastPortsChanged = false;
       this.reverse = false;
       this.brightness = normalizeBrightness(options.brightness);
       this.orientations = {};
@@ -519,11 +521,19 @@
     }
 
     setPorts({ inputs = [], outputs = [] } = {}) {
+      const ins = inputs.filter(isLaunchpadMiniMk3Port).sort(portSort).slice(0, 2);
+      const outs = outputs.filter(isLaunchpadMiniMk3Port).sort(portSort).slice(0, 2);
+      const signature = ins.map((port, index) => `${port.id || ""}:${outs[index]?.id || ""}`).join("|");
+      if (signature === this.portsSignature) {
+        this.lastPortsChanged = false;
+        this._status();
+        return this.getStatus();
+      }
+      this.portsSignature = signature;
+      this.lastPortsChanged = true;
       this.restoreLiveMode();
       this.meterPeaks.clear();
       this.stopConnectAnimation();
-      const ins = inputs.filter(isLaunchpadMiniMk3Port).sort(portSort).slice(0, 2);
-      const outs = outputs.filter(isLaunchpadMiniMk3Port).sort(portSort).slice(0, 2);
       this.devices = ins.map((input, index) => ({
         inputId: input.id,
         outputId: outs[index] ? outs[index].id : null,

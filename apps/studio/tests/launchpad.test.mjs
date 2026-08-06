@@ -290,6 +290,30 @@ test("pairs two MIDI ports, ignores DAW ports and enters Programmer Mode", () =>
   assert.equal(ledFrames[0].message.length, 251, "one SysEx frame contains all 81 LEDs");
 });
 
+test("ignores unchanged MIDI snapshots and only reconfigures changed Launchpad ports", () => {
+  const sent = [];
+  const manager = new LaunchpadMiniMk3Manager({
+    catalog,
+    send: (outputId, message) => sent.push({ outputId, message: [...message] }),
+  });
+  manager.setPorts(ports());
+  sent.length = 0;
+
+  manager.setPorts({
+    ...ports(),
+    inputs: [...ports().inputs, { id: "other", name: "Other MIDI" }],
+  });
+  assert.equal(manager.lastPortsChanged, false);
+  assert.equal(sent.length, 0, "unrelated MIDI changes do not reset Launchpads");
+
+  manager.setPorts({
+    inputs: [{ id: "in-new", name: "LPMiniMK3 MIDI A" }],
+    outputs: [{ id: "out-new", name: "LPMiniMK3 MIDI A" }],
+  });
+  assert.equal(manager.lastPortsChanged, true);
+  assert.equal(manager.getStatus()[0].inputId, "in-new");
+});
+
 test("sets and reapplies LED brightness to every connected Launchpad", () => {
   assert.deepEqual(Array.from(BRIGHTNESS_LEVELS), [0, 18, 36, 54, 73, 91, 109, 127]);
   assert.deepEqual(

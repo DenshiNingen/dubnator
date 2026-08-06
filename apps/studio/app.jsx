@@ -1697,7 +1697,7 @@ function App() {
         const surface = launchpadRef.current;
         if (surface) {
           surface.setPorts(ports);
-          surface.animateConnect();
+          if (surface.lastPortsChanged) surface.animateConnect();
         }
       };
 
