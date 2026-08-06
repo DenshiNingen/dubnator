@@ -4402,6 +4402,11 @@ input[type="range"]:disabled { opacity: 0.35; }
   padding: 0;
   border-radius: 2px;
 }
+.pl-mini.pl-load {
+  width: 38px;
+  font-size: 8px;
+  letter-spacing: 0.04em;
+}
 .pl-mini:hover { background: #1c1c1c; color: var(--text); border-color: #3a3a3a; }
 .pl-mini:disabled { opacity: 0.25; cursor: default; }
 .pl-mini.danger:hover { background: #3a0000; color: #ff5252; border-color: #5a1010; }

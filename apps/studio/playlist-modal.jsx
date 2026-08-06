@@ -41,7 +41,7 @@ function fmtSavedDate(ts) {
 
 // === PLAYLIST MODAL ===
 // Big centered modal showing both decks' playlists. Switch deck via tabs.
-// Shows track #, name, duration (lazily decoded). Click row to load+select that track.
+// Shows track #, name, duration (lazily decoded). Load and Load & Play are separate actions.
 // Per-row: ↑ ↓ (reorder), × (remove). Footer: + Add Files / Shuffle / Clear All.
 // Native drag-drop of audio files from OS supported.
 function PlaylistModal({
@@ -709,6 +709,8 @@ function PlaylistModal({
                       </span>
                       <span className="c-dur">{fmtDur(dur)}</span>
                       <span className="c-act">
+                        <button className="pl-mini pl-load" title="Load paused" aria-label={`Load ${info.title || file.name} paused`}
+                          onClick={() => onLoad(i, false)}>LOAD</button>
                         <button className="pl-mini" title="Load & play" onClick={() => onLoad(i)}>▶</button>
                         <button className="pl-mini" title="Move up" disabled={i === 0}
                           onClick={() => onMove(i, i - 1)}>↑</button>

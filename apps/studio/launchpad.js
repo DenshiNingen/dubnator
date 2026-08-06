@@ -253,15 +253,13 @@
     ], [
       "siren.trigger", "siren.prev", "siren.next",
     ], "magenta", true),
-    page("MASTER", "master", [
-      "master.gain", "master.hp", "master.lim", "limiter.reverb.thresh",
-      "limiter.echo.thresh", "system.autoadvance",
+    // Samples live on the last button of the left / mix surface so a single
+    // controller can reach the performance pads without switching roles.
+    page("SAMPLES", "sampler", [
+      "samples.gain", "samples.hp", "samples.rev", "samples.echo", "samples.select",
     ], [
-      "master.mono", "master.dim", "limiter.master.on", "limiter.reverb.on",
-      "limiter.echo.on", "xfade.a", "xfade.center", "xfade.b",
-      "xfade.curve.power", "xfade.curve.linear", "xfade.curve.sharp",
-      "recorder.toggle", "recorder.format",
-      "system.rewindstop", "system.line", "system.multi",
+      ...Array.from({ length: 12 }, (_, i) => `samples.trigger.${i}`),
+      "samples.hold", "samples.reverse",
     ]),
   ];
 
@@ -289,11 +287,16 @@
       "dubfilter.route.samples", "dubfilter.route.off",
       "echo.dub",
     ]),
-    page("SAMPLES", "sampler", [
-      "samples.gain", "samples.hp", "samples.rev", "samples.echo", "samples.select",
+    // Master replaces the former Samples tab on the right / FX surface.
+    page("MASTER", "master", [
+      "master.gain", "master.hp", "master.lim", "limiter.reverb.thresh",
+      "limiter.echo.thresh", "system.autoadvance",
     ], [
-      ...Array.from({ length: 12 }, (_, i) => `samples.trigger.${i}`),
-      "samples.hold", "samples.reverse",
+      "master.mono", "master.dim", "limiter.master.on", "limiter.reverb.on",
+      "limiter.echo.on", "xfade.a", "xfade.center", "xfade.b",
+      "xfade.curve.power", "xfade.curve.linear", "xfade.curve.sharp",
+      "recorder.toggle", "recorder.format",
+      "system.rewindstop", "system.line", "system.multi",
     ]),
     page("ISO ADV", "iso", [
       "kill.sub.freq", "kill.bass.freq", "kill.mid.freq", "kill.high.freq",

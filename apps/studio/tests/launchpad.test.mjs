@@ -360,9 +360,13 @@ test("one Launchpad switches between all 16 pages by holding the top arrows", ()
   assert.equal(manager.getStatus()[0].pageName, "ECHO");
   assert.equal(frameColour(sent.at(-1).message, 99), PALETTES.blue.bright);
 
-  // Short → opens right-hand page 4, then both roles remember their page.
+  // Short → opens right-hand page 4 (Master after the surface swap).
   manager.handleMidi({ deviceId: "in-a", data: [0xb0, 94, 127] });
   manager.handleMidi({ deviceId: "in-a", data: [0xb0, 94, 0] });
+  assert.equal(manager.getStatus()[0].pageName, "MASTER");
+
+  // Samples are now the last page on the left surface.
+  manager.selectPage(0, 7, "test");
   assert.equal(manager.getStatus()[0].pageName, "SAMPLES");
   manager.handleMidi({ deviceId: "in-a", data: [0x90, gridNote(4, 0), 127] });
   assert.equal(fired.at(-1).id, "samples.gain");
@@ -379,7 +383,7 @@ test("one Launchpad switches between all 16 pages by holding the top arrows", ()
   manager.handleMidi({ deviceId: "in-a", data: [0xb0, 93, 0] });
   manager.handleMidi({ deviceId: "in-a", data: [0x90, sampleTrigger, 0] });
   assert.equal(manager.getStatus()[0].role, "LEFT / MIX");
-  assert.equal(manager.getStatus()[0].pageName, "DECK B");
+  assert.equal(manager.getStatus()[0].pageName, "SAMPLES");
   assert.deepEqual(
     { id: fired.at(-1).id, value: fired.at(-1).value },
     { id: "samples.trigger.0", value: 0 },
@@ -388,10 +392,10 @@ test("one Launchpad switches between all 16 pages by holding the top arrows", ()
   manager.handleMidi({ deviceId: "in-a", data: [0xb0, 94, 127] });
   timers.fire();
   assert.equal(manager.getStatus()[0].role, "RIGHT / FX");
-  assert.equal(manager.getStatus()[0].pageName, "SAMPLES");
+  assert.equal(manager.getStatus()[0].pageName, "MASTER");
   assert.deepEqual(Array.from(roleChanges, ({ role, source }) => ({ role, source })), [
     { role: 1, source: "hardware-hold" },
-    { role: 0, source: "hardware-hold" },
+    { role: 0, source: "test" },
     { role: 1, source: "hardware-hold" },
   ]);
 
@@ -435,7 +439,7 @@ test("Help page selection updates the physical surface and its live status", () 
 
   assert.equal(manager.selectPage(1, 3, "help"), true);
   assert.equal(manager.getStatus()[0].role, "RIGHT / FX");
-  assert.equal(manager.getStatus()[0].pageName, "SAMPLES");
+  assert.equal(manager.getStatus()[0].pageName, "MASTER");
   assert.deepEqual(
     { role: roleChanges.at(-1).role, source: roleChanges.at(-1).source },
     { role: 1, source: "help" },
@@ -728,8 +732,11 @@ test("unipolar fader LEDs are off at zero and fill from the bottom", () => {
 
 test("deck end mode uses a coloured STOP / LOOP / NEXT Launchpad selector", () => {
   const manager = new LaunchpadMiniMk3Manager({ catalog });
-  const master = manager.describePage(0, 7);
-  assert.equal(master.ranges[5], "system.autoadvance");
+  const samples = manager.describePage(0, 7);
+  assert.equal(samples.name, "SAMPLES");
+  const rightMaster = manager.describePage(1, 3);
+  assert.equal(rightMaster.name, "MASTER");
+  assert.equal(rightMaster.ranges[5], "system.autoadvance");
 
   const expected = [
     [0, [0, 0, 0, 0, 0, 0, PALETTES.red.bright, PALETTES.red.bright]],
@@ -829,9 +836,9 @@ test("a kill fader activates at minimum and lifts the kill above minimum", () =>
 
 test("momentary sample pads dispatch press and release", () => {
   const { manager, fired } = setup();
-  manager.handleMidi({ deviceId: "in-b", data: [0xb0, 94, 127] }); // right page 4: samples
-  manager.handleMidi({ deviceId: "in-b", data: [0x90, 86, 127] }); // first free grid pad
-  manager.handleMidi({ deviceId: "in-b", data: [0x90, 86, 0] });
+  manager.selectPage(0, 7, "test"); // left page 8: samples
+  manager.handleMidi({ deviceId: "in-a", data: [0x90, 86, 127] }); // first free grid pad
+  manager.handleMidi({ deviceId: "in-a", data: [0x90, 86, 0] });
   assert.deepEqual(fired.slice(-2).map(({ id, value }) => ({ id, value })), [
     { id: "samples.trigger.0", value: 1 },
     { id: "samples.trigger.0", value: 0 },

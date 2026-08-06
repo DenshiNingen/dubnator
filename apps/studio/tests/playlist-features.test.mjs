@@ -38,3 +38,9 @@ test("Rekordbox XML import exposes playlist choice, order matching and folder pi
   assert.match(playlist, /webkitdirectory=""/);
   assert.match(playlist, /onPlaylistChange\?\.\(deckKey\)/);
 });
+
+test("playlist rows expose a paused load action separately from load and play", () => {
+  assert.match(playlist, /title="Load paused"/);
+  assert.match(playlist, /onClick=\{\(\) => onLoad\(i, false\)\}/);
+  assert.match(playlist, /title="Load & play"/);
+});
