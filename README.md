@@ -71,6 +71,19 @@ HTML report are written to `apps/studio/playwright-report/`; traces, screenshots
 and video from failed runs are written under `apps/studio/test-results/`.
 Neither directory is committed.
 
+For an occupied development port, run the browser suite on an isolated port:
+
+```bash
+DUBNATOR_E2E_URL=http://127.0.0.1:1421 pnpm test:e2e
+```
+
+Studio restores the current local deck playlists from IndexedDB after a reload,
+when the browser permits local storage of `File` objects. If IndexedDB is blocked
+(for example by a private WebView), the app keeps working and the existing
+playlist JSON/ZIP export and file-picker flows remain available. Waveform envelope
+generation runs in a versioned worker and falls back to the main thread when
+workers are unavailable, so the offline PWA remains functional.
+
 ## The rack
 
 A five-band isolator (SUB·LOW·MID·HIGH·TOP) with kills, punch-in & solo · dual decks
