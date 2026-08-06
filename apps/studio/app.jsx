@@ -47,6 +47,7 @@ const { KeyboardMap } = window.DubnatorKeyboardMap;
 const { LaunchpadLayoutHelp } = window.DubnatorLaunchpadHelp;
 const PlaylistModal = window.DubnatorPlaylistModal;
 const MIDI_CONTROLS = window.DubnatorMidiControls;
+const ECHO_TIMING = window.DubnatorEchoTiming;
 const { TapTempoTracker } = window.DubnatorTapTempo;
 
 // EQ routing selector → which EQ units are engaged. "KILLS ONLY" bypasses
@@ -748,6 +749,7 @@ function App() {
 
   // === echo ===
   const [echo, setEcho] = useState({ send: 0.3, time: 290, fb: 0.35, sat: 0.4, slide: 0.5, dw: 0.5, filter: 2760, filterQ: 1.0, hp: 150, hpOn: false, direct: false, type: 1, wow: 0, robotic: false, sync: false, syncDiv: "1/8", bpm: 120 });
+  const audibleEchoTime = ECHO_TIMING.resolved(echo);
   const tapTrackerRef = useRef(new TapTempoTracker());
   const [echoThrowHeld, setEchoThrowHeld] = useState(false);
   const echoThrowRestoreRef = useRef(null);
@@ -1005,9 +1007,11 @@ function App() {
     if (!ready) return;
     const musicEchoOn = musicSends.echo && !echo.direct;
     eng.setEchoSend(musicEchoOn ? echo.send : 0);
-    if (echo.sync && eng.setEchoSync) eng.setEchoSync(echo.bpm, echo.syncDiv);
-    else eng.setEchoTime(echo.time);
+    // Every source (UI, Launchpad/MIDI and TAP) resolves to one target and one
+    // tape-style transition. Set glide first so a simultaneous time change
+    // cannot accidentally use the previous SLIDE value.
     eng.setEchoSlide(echo.slide);
+    eng.setEchoTime(audibleEchoTime);
     eng.setEchoFeedback(echo.fb);
     eng.setEchoSat(echo.sat);
     eng.setEchoFilter(echo.filter);
@@ -1018,7 +1022,7 @@ function App() {
     eng.setEchoType(echo.type);
     if (eng.setEchoWow) eng.setEchoWow(echo.wow);
     if (eng.setEchoRobotic) eng.setEchoRobotic(echo.robotic);
-  }, [echo, musicSends, ready]);
+  }, [echo, audibleEchoTime, musicSends, ready]);
 
   useEffect(() => {
     if (!ready) return;
@@ -1188,6 +1192,40 @@ function App() {
     else init().then(() => { if (eng.siren) eng.siren.trigger(800); });
   };
 
+  const setManualEchoTime = (ms) => {
+    // Turning a physical time control takes ownership from tempo sync. This
+    // prevents the UI/MIDI/Launchpad position changing while the sound remains
+    // locked to an unrelated synced value.
+    setEcho((state) => ({
+      ...state,
+      time: ECHO_TIMING.clampMs(ms),
+      sync: false,
+    }));
+  };
+  const nudgeManualEchoTime = (factor) => {
+    setEcho((state) => ({
+      ...state,
+      time: ECHO_TIMING.clampMs(ECHO_TIMING.resolved(state) * factor),
+      sync: false,
+    }));
+  };
+  const setEchoSyncMode = (enabled) => {
+    setEcho((state) => {
+      const sync = !!enabled;
+      const time = sync
+        ? ECHO_TIMING.synced(state.bpm, state.syncDiv)
+        : ECHO_TIMING.resolved(state);
+      return { ...state, sync, time };
+    });
+  };
+  const setEchoSyncDivision = (syncDiv) => {
+    setEcho((state) => ({
+      ...state,
+      syncDiv,
+      time: state.sync ? ECHO_TIMING.synced(state.bpm, syncDiv) : state.time,
+    }));
+  };
+
   // tap tempo for echo
   const tapTempo = () => {
     const result = tapTrackerRef.current.tap(performance.now());
@@ -1196,13 +1234,20 @@ function App() {
     // A tap is one beat. The raw beat drives BPM while the manual delay stays
     // inside the echo's supported 30–1500 ms range.
     const bpm = Math.max(20, Math.min(400, Math.round(result.bpm)));
-    setEcho(s => ({ ...s, time: ms, bpm }));
+    setEcho((state) => ({
+      ...state,
+      bpm,
+      time: state.sync ? ECHO_TIMING.synced(bpm, state.syncDiv) : ms,
+    }));
   };
 
   const applyDubEchoPreset = () => {
     // Keep the performer's tapped tempo; only the musical division and sound
     // of the repeats are part of this quick starting point.
-    setEcho(s => ({ ...s, ...DUB_ECHO_START, bpm: s.bpm }));
+    setEcho((state) => {
+      const next = { ...state, ...DUB_ECHO_START, bpm: state.bpm };
+      return { ...next, time: ECHO_TIMING.synced(next.bpm, next.syncDiv) };
+    });
   };
 
   const echoThrowDown = () => {
@@ -1411,7 +1456,7 @@ function App() {
       "reverb.ret": (v) => setReverb((s) => ({ ...s, ret: +(v * 1.5).toFixed(3) })),
       "echo.send": (v) => setEcho((s) => ({ ...s, send: v })),
       "echo.fb": (v) => setEcho((s) => ({ ...s, fb: +(v * 0.95).toFixed(3) })),
-      "echo.time": (v) => setEcho((s) => ({ ...s, time: Math.round(30 + v * 1470) })),
+      "echo.time": (v) => setManualEchoTime(ECHO_TIMING.fromUnit(v)),
       "music.rev": (v) => setMusicSends((s) => ({ ...s, rev: v > 0.5 })),
       "music.echo": (v) => setMusicSends((s) => ({ ...s, echo: v > 0.5 })),
       "dubfilter.cutoff": (v) => setDubFilter((s) => ({ ...s, cutoff: Math.round(20 * Math.pow(1000, v)) })),
@@ -1447,7 +1492,7 @@ function App() {
       "master.mono": (v) => setMaster((s) => ({ ...s, mono: v > 0.5 })),
       "master.dim": (v) => setMaster((s) => ({ ...s, dim: v > 0.5 })),
       "pure.sub": (v) => setPureSub(v > 0.5),
-      "echo.sync": (v) => setEcho((s) => ({ ...s, sync: v > 0.5 })),
+      "echo.sync": (v) => setEchoSyncMode(v > 0.5),
       "reverb.dw": (v) => setReverb((s) => ({ ...s, dw: v })),
       "siren.lfo1rate": (v) => setSiren((s) => ({ ...s, lfo1Rate: +(v * 15).toFixed(2) })),
       "siren.lfo1depth": (v) => setSiren((s) => ({ ...s, lfo1Depth: Math.round(v * 400) })),
@@ -1524,7 +1569,7 @@ function App() {
       "echo.tap": (v) => { if (v > 0.5) actionsRef.current.tapTempo?.(); },
       "echo.dub": (v) => { if (v > 0.5) actionsRef.current.echoDub?.(); },
       "echo.throw": (v) => actionsRef.current.echoThrow?.(v > 0.5),
-      "echo.div": (v) => setEcho((s) => ({ ...s, syncDiv: ["1/4", "1/4.", "1/4t", "1/8", "1/8.", "1/8t", "1/16", "1/16t"][Math.min(7, Math.round(v * 7))] })),
+      "echo.div": (v) => setEchoSyncDivision(["1/4", "1/4.", "1/4t", "1/8", "1/8.", "1/8t", "1/16", "1/16t"][Math.min(7, Math.round(v * 7))]),
       "echo.hp": (v) => setEcho((s) => ({ ...s, hpOn: v > 0.5 })),
       "echo.panic": (v) => { if (v > 0.5 && eng.panicFX) eng.panicFX(); },
       "dubfilter.hp": (v) => { if (v > 0.5) setDubFilter((s) => ({ ...s, on: true, mode: "hp" })); },
@@ -1738,7 +1783,7 @@ function App() {
       "kill.mid": kills.mid ? 1 : 0, "kill.high": kills.high ? 1 : 0, "kill.top": kills.top ? 1 : 0,
       "reverb.send": clamp(reverb.send), "reverb.ret": clamp(reverb.ret / 1.5),
       "echo.send": clamp(echo.send), "echo.fb": clamp(echo.fb / 0.95),
-      "echo.time": clamp((echo.time - 30) / 1470),
+      "echo.time": clamp(ECHO_TIMING.toUnit(audibleEchoTime)),
       "music.rev": musicSends.rev ? 1 : 0, "music.echo": musicSends.echo ? 1 : 0,
       "dubfilter.cutoff": clamp(Math.log(dubFilter.cutoff / 20) / Math.log(1000)),
       "siren.gain": clamp(siren.gain / 1.2), "samples.gain": clamp(sampleFx.gain),
@@ -2071,8 +2116,8 @@ function App() {
       if (k === "7") { e.preventDefault(); setEcho(s => ({ ...s, filter: Math.max(120, s.filter * 0.85) })); return; }
       if (k === "8") { e.preventDefault(); setEcho(s => ({ ...s, filter: Math.min(20000, s.filter * 1.15) })); return; }
       if (k === "9") { e.preventDefault(); tapTempo(); return; }
-      if (!shift && kl === "a") { e.preventDefault(); setEcho(s => ({ ...s, time: Math.max(30, s.time * 0.9) })); return; } // time fast (shorter)
-      if (!shift && kl === "s") { e.preventDefault(); setEcho(s => ({ ...s, time: Math.min(1500, s.time * 1.1) })); return; } // time slow (longer)
+      if (!shift && kl === "a") { e.preventDefault(); nudgeManualEchoTime(0.9); return; } // time fast (shorter)
+      if (!shift && kl === "s") { e.preventDefault(); nudgeManualEchoTime(1.1); return; } // time slow (longer)
       if (shift && kl === "d") { e.preventDefault(); setEcho(s => ({ ...s, type: s.type === 1 ? 2 : 1 })); return; } // echo type
       if (!shift && kl === "d") {
         if (!heldRef.current.has("d")) { heldRef.current.add("d"); setEcho(s => ({ ...s, fb: 0.7 })); }
@@ -3595,11 +3640,11 @@ function App() {
                 THROW</button>
               <button className="btn-xs btn fx-action fx-timing" onClick={tapTempo}>TAP</button>
               <button className={`btn-xs btn fx-action fx-sync ${echo.sync ? "active" : ""}`}
-                onClick={() => setEcho(s => ({ ...s, sync: !s.sync }))}
+                onClick={() => setEchoSyncMode(!echo.sync)}
                 title="Tempo-sync the echo to a musical division of the tapped BPM">SYNC</button>
               {echo.sync && (
                 <select className="mono echo-sync-select"
-                  value={echo.syncDiv} onChange={(e) => setEcho(s => ({ ...s, syncDiv: e.target.value }))}
+                  value={echo.syncDiv} onChange={(e) => setEchoSyncDivision(e.target.value)}
                   title="Echo time as a fraction of the beat">
                   {ECHO_DIVS.map(d => (
                     <option key={d} value={d}>{d}</option>
@@ -3616,7 +3661,7 @@ function App() {
                 ROBOT</button>
               <button className="btn-xs btn fx-action fx-panic"
                 onClick={() => eng.panicFX && eng.panicFX()}>PANIC</button>
-              <span className="panel-sub fx-status">{echo.robotic ? "ROBOTIC" : echo.sync ? `TEMPO ${echo.bpm} BPM · ${echo.syncDiv}` : `DELAY ${echo.time.toFixed(0)} MS · TEMPO ${(60000 / Math.max(1, echo.time)).toFixed(0)} BPM`}</span>
+              <span className="panel-sub fx-status">{echo.robotic ? "ROBOTIC" : echo.sync ? `DELAY ${audibleEchoTime.toFixed(0)} MS · ${echo.bpm} BPM · ${echo.syncDiv}` : `DELAY ${audibleEchoTime.toFixed(0)} MS · TEMPO ${(60000 / Math.max(1, audibleEchoTime)).toFixed(0)} BPM`}</span>
             </div>
           </div>
           <div className="panel-body">
@@ -3632,8 +3677,11 @@ function App() {
                   { k: "time", label: "TIME", tone: "yellow", min: 30, max: 1500, fmt: fmtMs },
                 ].map((d) => (
                   <Knob key={d.k} size="md" label={d.label} tone={d.tone} midiId={`echo.${d.k}`}
-                    value={echo[d.k]} min={d.min} max={d.max}
-                    onChange={(v) => setEcho((s) => ({ ...s, [d.k]: v }))}
+                    value={d.k === "time" ? audibleEchoTime : echo[d.k]} min={d.min} max={d.max}
+                    scale={d.k === "time" ? "log" : "linear"}
+                    onChange={(v) => d.k === "time"
+                      ? setManualEchoTime(v)
+                      : setEcho((s) => ({ ...s, [d.k]: v }))}
                     format={d.fmt} />
                 ))}
               </div>

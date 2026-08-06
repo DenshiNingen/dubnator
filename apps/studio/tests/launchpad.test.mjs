@@ -16,6 +16,7 @@ vm.runInContext(await readFile(join(ROOT, "launchpad.js"), "utf8"), sandbox, {
 });
 
 const catalog = sandbox.window.DubnatorMidiControls;
+const echoTiming = sandbox.window.DubnatorEchoTiming;
 const {
   LaunchpadMiniMk3Manager,
   BRIGHTNESS_LEVELS,
@@ -207,6 +208,20 @@ test("echo and reverb keep analogous controls in matching positions", () => {
   assert.equal(echo.sideButtons[7], "echo.throw");
   assert.equal(reverb.sideButtons[7], "music.rev");
   assert.equal(manager.describePage(1, 2).sideButtons[7], "echo.dub");
+});
+
+test("echo time fader uses useful logarithmic hardware positions", () => {
+  const control = catalog.find(({ id }) => id === "echo.time");
+  assert.equal(control.surfaceLaw, "log-time");
+  assert.deepEqual(
+    Array.from(control.surfaceSteps, (value) => Math.round(echoTiming.fromUnit(value))),
+    Array.from(echoTiming.surfaceTimes),
+  );
+  for (const ms of [30, 60, 120, 240, 375, 500, 750, 1500]) {
+    assert.ok(Math.abs(echoTiming.fromUnit(echoTiming.toUnit(ms)) - ms) < 1e-6);
+  }
+  assert.equal(echoTiming.synced(120, "1/8"), 250);
+  assert.equal(echoTiming.synced(120, "1/8."), 375);
 });
 
 test("siren uses previous/next navigation and exposes both FX amounts", () => {

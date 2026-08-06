@@ -2,6 +2,40 @@
 // App because they close over React state; identity/labels stay data-only here.
 (function () {
   const freqs10 = [32, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+  const ECHO_TIME_MIN_MS = 30;
+  const ECHO_TIME_MAX_MS = 1500;
+  const ECHO_DIVISION_FACTORS = Object.freeze({
+    "1/4": 1,
+    "1/4.": 1.5,
+    "1/4t": 2 / 3,
+    "1/8": 0.5,
+    "1/8.": 0.75,
+    "1/8t": 1 / 3,
+    "1/16": 0.25,
+    "1/16t": 1 / 6,
+  });
+  const clamp = (value, min, max) => Math.max(min, Math.min(max, Number(value) || 0));
+  // Delay time is logarithmic: equal physical travel produces equal ratios,
+  // like a hardware time pot, with useful resolution in the short dub range.
+  const echoTimeFromUnit = (value) => ECHO_TIME_MIN_MS * Math.pow(
+    ECHO_TIME_MAX_MS / ECHO_TIME_MIN_MS,
+    clamp(value, 0, 1),
+  );
+  const echoTimeToUnit = (ms) => Math.log(
+    clamp(ms, ECHO_TIME_MIN_MS, ECHO_TIME_MAX_MS) / ECHO_TIME_MIN_MS,
+  ) / Math.log(ECHO_TIME_MAX_MS / ECHO_TIME_MIN_MS);
+  const echoSyncedTime = (bpm, division) => {
+    const beatMs = 60000 / clamp(bpm || 120, 20, 400);
+    const factor = ECHO_DIVISION_FACTORS[division] ?? 0.5;
+    return clamp(beatMs * factor, ECHO_TIME_MIN_MS, ECHO_TIME_MAX_MS);
+  };
+  const echoResolvedTime = (state) => state?.sync
+    ? echoSyncedTime(state.bpm, state.syncDiv)
+    : clamp(state?.time, ECHO_TIME_MIN_MS, ECHO_TIME_MAX_MS);
+  // Eight hardware pads favour classic useful positions and line up with
+  // common tapped values instead of dividing milliseconds into equal chunks.
+  const echoTimeSurfaceTimes = Object.freeze([30, 60, 120, 240, 375, 500, 750, 1500]);
+  const echoTimeSurfaceSteps = echoTimeSurfaceTimes.map(echoTimeToUnit);
   // Launchpad isolator fader law. Equal physical steps are deliberately not
   // equal dB steps: the useful area near unity gets fine control, then the
   // attenuation accelerates towards silence. The bottom pad remains KILL.
@@ -34,7 +68,7 @@
     { id: "reverb.ret", label: "Reverb Return", type: "range", surfaceNeutral: 2 / 3, surfaceSteps: gainSteps15, surfaceLaw: "audio" },
     { id: "echo.send", label: "Echo Send", type: "range", surfaceSteps: gainSteps1, surfaceLaw: "audio" },
     { id: "echo.fb", label: "Echo Feedback", type: "range" },
-    { id: "echo.time", label: "Echo Time", type: "range" },
+    { id: "echo.time", label: "Echo Time", type: "range", surfaceSteps: echoTimeSurfaceSteps, surfaceLaw: "log-time" },
     { id: "music.rev", label: "Music→Reverb", type: "button" },
     { id: "music.echo", label: "Music→Echo", type: "button" },
     { id: "dubfilter.cutoff", label: "Dub Filter Cutoff", type: "range" },
@@ -215,5 +249,16 @@
     })),
   );
 
+  window.DubnatorEchoTiming = Object.freeze({
+    DIVISION_FACTORS: ECHO_DIVISION_FACTORS,
+    MAX_MS: ECHO_TIME_MAX_MS,
+    MIN_MS: ECHO_TIME_MIN_MS,
+    clampMs: (ms) => clamp(ms, ECHO_TIME_MIN_MS, ECHO_TIME_MAX_MS),
+    fromUnit: echoTimeFromUnit,
+    resolved: echoResolvedTime,
+    surfaceTimes: echoTimeSurfaceTimes,
+    synced: echoSyncedTime,
+    toUnit: echoTimeToUnit,
+  });
   window.DubnatorMidiControls = controls;
 })();

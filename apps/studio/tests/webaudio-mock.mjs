@@ -5,11 +5,11 @@
 
 class AudioParam {
   constructor(value = 0) { this.value = value; this._events = []; }
-  setValueAtTime(v) { this.value = v; return this; }
-  setTargetAtTime(v) { this.value = v; return this; }
-  linearRampToValueAtTime(v) { this.value = v; return this; }
-  exponentialRampToValueAtTime(v) { this.value = v; return this; }
-  cancelScheduledValues() { return this; }
+  setValueAtTime(v, time) { this.value = v; this._events.push({ type: "set", value: v, time }); return this; }
+  setTargetAtTime(v, time, constant) { this.value = v; this._events.push({ type: "target", value: v, time, constant }); return this; }
+  linearRampToValueAtTime(v, time) { this.value = v; this._events.push({ type: "linear", value: v, time }); return this; }
+  exponentialRampToValueAtTime(v, time) { this.value = v; this._events.push({ type: "exponential", value: v, time }); return this; }
+  cancelScheduledValues(time) { this._events.push({ type: "cancel", time }); return this; }
 }
 
 class AudioNode {

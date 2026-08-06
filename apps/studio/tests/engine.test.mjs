@@ -1013,6 +1013,20 @@ ok(eng.echoDelay.delayTime.value < 0.02, "robotic overrides tempo-sync");
 eng.setEchoRobotic(false);
 ok(Math.abs(eng.echoDelay.delayTime.value - 0.5) < 1e-9, "disengage robotic restores the synced time");
 
+section("hardware-style echo time glide");
+eng.setEchoRobotic(false);
+eng.echoDelay.delayTime._events.length = 0;
+eng.setEchoSlide(0);
+eng.setEchoTime(333);
+ok(Math.abs(eng._echoTimeTransition - 0.015) < 1e-9, "minimum SLIDE is a short 15ms tape ramp");
+ok(eng.echoDelay.delayTime._events.at(-1)?.type === "linear", "time changes use a pitch-bending linear ramp");
+const scheduled = eng.echoDelay.delayTime._events.length;
+eng.setEchoTime(333);
+ok(eng.echoDelay.delayTime._events.length === scheduled, "unchanged time does not restart its ramp");
+eng.setEchoSlide(1);
+eng.setEchoTime(777);
+ok(Math.abs(eng._echoTimeTransition - 0.5) < 1e-9, "maximum SLIDE is a deliberate 500ms tape drag");
+
 section("full-speed / robotic echo (§8)");
 eng.setEchoTime(500);
 ok(Math.abs(eng.echoDelay.delayTime.value - 0.5) < 1e-9, "normal: 500ms → 0.5s delay");

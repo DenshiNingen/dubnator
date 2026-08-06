@@ -1397,10 +1397,33 @@
     }
 
     setEchoSend(v) { this.musicEchoSend.gain.value = v; }
+    _glideEchoTime(ms, duration = this._echoSlide || 0.05) {
+      const param = this.echoDelay.delayTime;
+      const now = this.ctx.currentTime;
+      const target = Math.max(0.005, Math.min(2, ms / 1000));
+      const seconds = Math.max(0.005, Math.min(0.6, Number(duration) || 0.05));
+      // A linear delay-time ramp makes the repeats bend in pitch as a physical
+      // tape/BBD delay does while its time pot is moving. Anchor the current
+      // value before replacing an in-flight ramp so continuous pointer/MIDI
+      // movement follows the performer without zippering or stale automation.
+      if (typeof param.cancelAndHoldAtTime === "function") {
+        param.cancelAndHoldAtTime(now);
+      } else {
+        const current = param.value;
+        param.cancelScheduledValues(now);
+        param.setValueAtTime(current, now);
+      }
+      param.linearRampToValueAtTime(target, now + seconds);
+      this._echoTimeTransition = seconds;
+    }
     setEchoTime(ms) {
-      this._echoTimeMs = ms;
+      const next = Math.max(20, Math.min(2000, Number(ms) || 290));
+      const changed = this._echoTimeMs == null || Math.abs(next - this._echoTimeMs) >= 0.1;
+      this._echoTimeMs = next;
       if (this._echoRobotic) return; // robotic mode owns the delay time
-      this.echoDelay.delayTime.setTargetAtTime(ms / 1000, this.ctx.currentTime, this._echoSlide || 0.05);
+      // The React effect also runs for feedback/filter changes. Do not restart
+      // the time ramp unless its actual target changed.
+      if (changed) this._glideEchoTime(next);
     }
     // Tempo-synced echo: set the delay to a musical division of the beat.
     // division is a fraction of a quarter note (1/8 = 0.5, dotted/triplet via
@@ -1418,16 +1441,23 @@
     // the feedback rings as a metallic comb. While engaged, setEchoTime is held
     // off; disengaging restores the last requested time.
     setEchoRobotic(on) {
-      this._echoRobotic = !!on;
-      if (on) {
-        this.echoDelay.delayTime.setTargetAtTime(0.014, this.ctx.currentTime, 0.005);
+      const next = !!on;
+      if (next === !!this._echoRobotic) return;
+      this._echoRobotic = next;
+      if (next) {
+        this._glideEchoTime(14, 0.008);
       } else {
         const ms = this._echoTimeMs == null ? 290 : this._echoTimeMs;
-        this.echoDelay.delayTime.setTargetAtTime(ms / 1000, this.ctx.currentTime, this._echoSlide || 0.05);
+        this._glideEchoTime(ms);
       }
       this._applyEchoWow(); // robotic holds the wow/flutter LFOs off so the comb stays fixed
     }
-    setEchoSlide(v) { this._echoSlide = 0.005 + v * 0.5; } // 0..1 -> 5ms..505ms time-constant
+    // Direct transition duration, rather than an asymptotic time constant:
+    // low values feel immediate, while high values deliberately drag the tape.
+    setEchoSlide(v) {
+      const unit = Math.max(0, Math.min(1, Number(v) || 0));
+      this._echoSlide = 0.015 + Math.pow(unit, 1.5) * 0.485;
+    }
     setEchoFeedback(v) { this.echoFB.gain.value = Math.min(0.85, v); }
     // Tape wow/flutter depth (0..1): 0 = clean delay, 1 = heavy warble.
     // Scales both LFOs (wow up to ±4 ms, flutter up to ±1.2 ms of delay time).

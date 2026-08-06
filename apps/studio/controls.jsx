@@ -36,38 +36,51 @@ function controlLabel(label, midiId, fallback) {
   return fallback;
 }
 
-function handleSliderKey(event, value, min, max, onChange) {
-  const range = max - min;
-  const fineStep = range / 100;
-  const coarseStep = range / 10;
+function valuePosition(value, min, max, scale = "linear") {
+  if (scale === "log" && min > 0 && max > min) {
+    return Math.log(clamp(value, min, max) / min) / Math.log(max / min);
+  }
+  return (clamp(value, min, max) - min) / (max - min);
+}
+
+function valueFromPosition(position, min, max, scale = "linear") {
+  const unit = clamp(position, 0, 1);
+  if (scale === "log" && min > 0 && max > min) return min * Math.pow(max / min, unit);
+  return min + unit * (max - min);
+}
+
+function handleSliderKey(event, value, min, max, onChange, scale = "linear") {
+  const position = valuePosition(value, min, max, scale);
+  const fineStep = 0.01;
+  const coarseStep = 0.1;
   let next;
   switch (event.key) {
     case "ArrowUp":
     case "ArrowRight":
-      next = value + (event.shiftKey ? coarseStep : fineStep);
+      next = position + (event.shiftKey ? coarseStep : fineStep);
       break;
     case "ArrowDown":
     case "ArrowLeft":
-      next = value - (event.shiftKey ? coarseStep : fineStep);
+      next = position - (event.shiftKey ? coarseStep : fineStep);
       break;
     case "PageUp":
-      next = value + coarseStep;
+      next = position + coarseStep;
       break;
     case "PageDown":
-      next = value - coarseStep;
+      next = position - coarseStep;
       break;
     case "Home":
-      next = min;
+      next = 0;
       break;
     case "End":
-      next = max;
+      next = 1;
       break;
     default:
       return;
   }
   event.preventDefault();
   event.stopPropagation();
-  onChange(clamp(next, min, max));
+  onChange(valueFromPosition(next, min, max, scale));
 }
 
 function useWindowPointerDrag() {
@@ -98,7 +111,7 @@ function useWindowPointerDrag() {
 }
 
 // ============ KNOB ============
-function Knob({ value, min = 0, max = 1, onChange, label, format, size = "md", midiId, tone = "", ariaLabel }) {
+function Knob({ value, min = 0, max = 1, onChange, label, format, size = "md", midiId, tone = "", ariaLabel, scale = "linear" }) {
   const ref = useRef(null);
   const drag = useRef(null);
   const startPointerDrag = useWindowPointerDrag();
@@ -107,18 +120,17 @@ function Knob({ value, min = 0, max = 1, onChange, label, format, size = "md", m
   const onPointerDown = (e) => {
     if (tryLearn(e)) return;
     e.preventDefault();
-    drag.current = { y: e.clientY, v: value };
+    drag.current = { y: e.clientY, position: valuePosition(value, min, max, scale) };
     startPointerDrag(onPointerMove, () => { drag.current = null; });
   };
   const onPointerMove = (e) => {
     if (!drag.current) return;
     const dy = drag.current.y - e.clientY;
-    const range = max - min;
-    const next = clamp(drag.current.v + (dy / 150) * range, min, max);
-    onChange(next);
+    const next = clamp(drag.current.position + dy / 150, 0, 1);
+    onChange(valueFromPosition(next, min, max, scale));
   };
 
-  const pct = (value - min) / (max - min);
+  const pct = valuePosition(value, min, max, scale);
   const angle = -135 + pct * 270; // -135 to 135 deg
 
   return (
@@ -127,7 +139,7 @@ function Knob({ value, min = 0, max = 1, onChange, label, format, size = "md", m
         ref={ref}
         className={`knob ${size === "sm" ? "sm" : size === "lg" ? "lg" : ""} ${learning ? "midi-learning" : ""}`}
         onPointerDown={onPointerDown}
-        onKeyDown={(event) => handleSliderKey(event, value, min, max, onChange)}
+        onKeyDown={(event) => handleSliderKey(event, value, min, max, onChange, scale)}
         role="slider"
         tabIndex={0}
         aria-label={controlLabel(ariaLabel || label, midiId, "Rotary control")}

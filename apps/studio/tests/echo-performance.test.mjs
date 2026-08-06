@@ -5,6 +5,7 @@ import vm from "node:vm";
 
 const root = new URL("../", import.meta.url);
 const app = await readFile(new URL("app.jsx", root), "utf8");
+const controls = await readFile(new URL("controls.jsx", root), "utf8");
 const match = app.match(/const DUB_ECHO_START = Object\.freeze\((\{[\s\S]*?\})\);/);
 assert.ok(match, "DUB_ECHO_START is declared");
 const dub = vm.runInNewContext(`(${match[1]})`);
@@ -27,4 +28,13 @@ test("echo throw is a held gesture that restores the previous routing", () => {
   assert.match(app, /"echo\.throw": \(v\) => actionsRef\.current\.echoThrow\?\.\(v > 0\.5\)/);
   assert.match(app, /onPointerDown=\{\(event\) =>/);
   assert.match(app, /onPointerUp=\{\(event\) =>/);
+});
+
+test("manual, Launchpad and tap timing share one hardware-style delay path", () => {
+  assert.match(app, /eng\.setEchoSlide\(echo\.slide\);\s*eng\.setEchoTime\(audibleEchoTime\);/);
+  assert.match(app, /"echo\.time": \(v\) => setManualEchoTime\(ECHO_TIMING\.fromUnit\(v\)\)/);
+  assert.match(app, /time: ECHO_TIMING\.clampMs\(ms\),\s*sync: false/);
+  assert.match(app, /time: state\.sync \? ECHO_TIMING\.synced\(bpm, state\.syncDiv\) : ms/);
+  assert.match(app, /scale=\{d\.k === "time" \? "log" : "linear"\}/);
+  assert.match(controls, /scale === "log"/);
 });
