@@ -93,37 +93,45 @@ function PlaylistModal({
   useEffect(() => {
     if (!open || !engDeck) return;
     const files = engDeck.playlist || [];
-    files.forEach((file, i) => {
+    let cancelled = false;
+    let cursor = 0;
+    const probe = async (file, i) => {
       const key = `${deckKey}|${i}|${file.name}|${file.size}`;
-      if (durations[key] != null) return;
-      const url = URL.createObjectURL(file);
-      const el = document.createElement("audio");
-      el.preload = "metadata";
-      el.src = url;
-      const cleanup = () => { try { URL.revokeObjectURL(url); } catch (_) {} };
-      el.addEventListener("loadedmetadata", () => {
-        setDurations(d => ({ ...d, [key]: el.duration || 0 }));
-        cleanup();
-      });
-      el.addEventListener("error", () => {
-        cleanup();
-        // <audio> can't read this container for metadata (e.g. AIFF in Chrome).
-        // Fall back to parsing the AIFF header for duration — cheap, no decode.
-        if (!window.DubnatorAiffDuration) return;
-        file.slice(0, 1 << 18).arrayBuffer().then(head => {
-          const dur = window.DubnatorAiffDuration(head);
-          if (dur) setDurations(d => ({ ...d, [key]: dur }));
-        }).catch(() => {});
+      if (durations[key] == null) await new Promise((resolve) => {
+        const url = URL.createObjectURL(file);
+        const el = document.createElement("audio");
+        el.preload = "metadata";
+        el.src = url;
+        const cleanup = () => { try { URL.revokeObjectURL(url); } catch (_) {} };
+        const done = (value) => {
+          if (!cancelled && value) setDurations((d) => ({ ...d, [key]: value }));
+          cleanup(); resolve();
+        };
+        el.addEventListener("loadedmetadata", () => done(el.duration || 0));
+        el.addEventListener("error", () => {
+          if (!window.DubnatorAiffDuration) { done(0); return; }
+          file.slice(0, 1 << 18).arrayBuffer().then((head) => done(window.DubnatorAiffDuration(head) || 0)).catch(() => done(0));
+        });
       });
       const metaKey = trackKey(file);
-      if (metadata[metaKey] == null && trackMetadata?.get) {
-        trackMetadata.get(file).then((info) => {
-          setMetadata((current) => current[metaKey] != null
-            ? current
-            : { ...current, [metaKey]: info || {} });
-        }).catch(() => {});
+      if (!cancelled && metadata[metaKey] == null && trackMetadata?.get) {
+        try {
+          const info = await trackMetadata.get(file);
+          if (!cancelled) setMetadata((current) => current[metaKey] != null ? current : { ...current, [metaKey]: info || {} });
+        } catch (_) {}
+      }
+    };
+    // Four probes keep a 400-track library responsive instead of creating
+    // hundreds of audio elements and full-file metadata reads at once.
+    const workers = Array.from({ length: 4 }, async () => {
+      while (!cancelled) {
+        const i = cursor++;
+        if (i >= files.length) return;
+        await probe(files[i], i);
       }
     });
+    Promise.all(workers).catch(() => {});
+    return () => { cancelled = true; };
   }, [open, deckKey, state.playlist.length, state.playlist.join("|")]);
 
   const fmtDur = (s) => {

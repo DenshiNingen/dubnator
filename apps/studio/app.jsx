@@ -2350,7 +2350,9 @@ function App() {
     const store = window.DubnatorPlaylistStore;
     // Persist the source even when the two decks are intentionally separate.
     // IndexedDB is best-effort and never blocks a live playlist operation.
-    store?.save(sourceKey, source.playlist || []);
+    // A linked pair has one collection, so persist it once under a shared key
+    // instead of cloning hundreds of audio files into IndexedDB twice.
+    store?.save(playlistsLinked ? "shared" : sourceKey, source.playlist || []);
     if (!force && !playlistsLinked) return;
     const targetCurrent = target.file || target.playlist?.[target.playlistIdx];
     target.playlist = [...(source.playlist || [])];
@@ -2372,7 +2374,7 @@ function App() {
       playlist: target.playlist.map((file) => file.name),
       playlistIdx: target.playlistIdx,
     }));
-    store?.save(sourceKey === "B" ? "A" : "B", target.playlist || []);
+    if (!playlistsLinked) store?.save(sourceKey === "B" ? "A" : "B", target.playlist || []);
   };
 
   // Restore the last local session once after the engine is ready. Existing
@@ -2384,11 +2386,11 @@ function App() {
     sessionRestoredRef.current = true;
     const store = window.DubnatorPlaylistStore;
     if (!store) return;
-    const restoreDeck = async (deckKey) => {
+    const restoreDeck = async (deckKey, filesOverride = null) => {
       const target = deckKey === "B" ? eng.deckB : eng.deckA;
       const setDeck = deckKey === "B" ? setDeckB : setDeckA;
       if (!target || target.playlist?.length) return false;
-      const files = await store.load(deckKey);
+      const files = filesOverride || await store.load(deckKey);
       if (!files.length || target.playlist?.length) return false;
       files.forEach((file) => target.addToPlaylist(file));
       if (!target.buffer) {
@@ -2404,8 +2406,9 @@ function App() {
       return true;
     };
     (async () => {
-      const restoredA = await restoreDeck("A");
-      await restoreDeck("B");
+      const shared = playlistsLinked ? await store.load("shared") : [];
+      const restoredA = await restoreDeck("A", shared.length ? shared : null);
+      await restoreDeck("B", shared.length ? shared : null);
       if (restoredA && playlistsLinked) syncLinkedPlaylist("A", true);
     })();
   }, [ready]);

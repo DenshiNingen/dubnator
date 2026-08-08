@@ -7,6 +7,7 @@
   const DB_VERSION = 1;
   const STORE = "sessions";
   let opening = null;
+  const pendingSaves = new Map();
 
   function open() {
     if (opening) return opening;
@@ -45,7 +46,16 @@
       lastModified: Number(file.lastModified) || 0,
       blob: file,
     }));
-    return transaction(deck, "readwrite", (store, key) => store.put(records, key));
+    // Let the current pointer event/render finish before structured-cloning a
+    // large library. Repeated playlist updates coalesce to the latest snapshot.
+    if (pendingSaves.has(deck)) clearTimeout(pendingSaves.get(deck).timer);
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        pendingSaves.delete(deck);
+        transaction(deck, "readwrite", (store, key) => store.put(records, key)).then(resolve);
+      }, 0);
+      pendingSaves.set(deck, { timer });
+    });
   }
   function load(deck) {
     return transaction(deck, "readonly", (store, key) => store.get(key)).then((records) => {
