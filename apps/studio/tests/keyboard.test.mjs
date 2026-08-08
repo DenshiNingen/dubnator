@@ -120,7 +120,7 @@ test("siren preset moved to keys 2 and 3", () => {
 });
 
 test("global performance shortcuts ignore focused controls but stay live in performance tools", () => {
-  assert.match(SRC, /closest\?\.\("input, textarea, select, button, \[role='slider'\]/);
+  assert.match(SRC, /closest\?\.\("input, textarea, select, \[role='slider'\]/);
   assert.match(SRC, /if \(helpOpen \|\| midiOpen\) return/);
   assert.match(SRC, /if \(deckFocusOpen\) \{ setDeckFocusOpen\(false\); return; \}/);
   assert.match(SRC, /if \(midiOpen\) \{ setMidiOpen\(false\); return; \}/);

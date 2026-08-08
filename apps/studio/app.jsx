@@ -2067,9 +2067,10 @@ function App() {
   const punchPrevRef = useRef({ sub: false, bass: false, mid: false, high: false, top: false });
 
   useEffect(() => {
-    const interactive = (el) => !!el && (
+    const interactive = (el, event) => !!el && (
       el.isContentEditable
-      || !!el.closest?.("input, textarea, select, button, [role='slider'], [role='radio'], [role='tab']")
+      || !!el.closest?.("input, textarea, select, [role='slider'], [role='radio'], [role='tab']")
+      || (!!el.closest?.("button") && (event.key === " " || event.key === "Enter"))
     );
 
     const down = (e) => {
@@ -2088,7 +2089,7 @@ function App() {
         if (midiOpen) { setMidiOpen(false); return; }
         return;
       }
-      if (interactive(e.target)) return;
+      if (interactive(e.target, e)) return;
       if (e.ctrlKey || e.metaKey) return;
       if (k === "?" || (shift && k === "/")) { e.preventDefault(); setHelpOpen(v => !v); return; }
       // Performance shortcuts remain live while siren, playlist and expanded
