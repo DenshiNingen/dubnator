@@ -2091,7 +2091,10 @@ function App() {
       if (interactive(e.target)) return;
       if (e.ctrlKey || e.metaKey) return;
       if (k === "?" || (shift && k === "/")) { e.preventDefault(); setHelpOpen(v => !v); return; }
-      if (helpOpen || sirenSetupOpen || playlistOpen || midiOpen || deckFocusOpen) return;
+      // Performance shortcuts remain live while siren, playlist and expanded
+      // deck tools are open. Their text/select/slider controls are still
+      // protected by interactive(), while Help and MIDI mapping stay modal.
+      if (helpOpen || midiOpen) return;
 
       // ---- Screen views (mirror the SETUP / AUDIO / PANEL display tabs) ----
       if (shift && kl === "a") { e.preventDefault(); setMainView("display"); setDisplayMode(m => m === "image" ? "spectrum" : m); return; } // Audio
