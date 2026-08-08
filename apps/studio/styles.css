@@ -1061,6 +1061,26 @@ input.midi-learning { animation: midiLearnPulse 0.6s ease-in-out infinite; }
 .playlist-import-progress-track { height: 5px; margin-top: 8px; overflow: hidden; border: 1px solid #303640; background: #080a0d; }
 .playlist-import-progress-track i { display: block; height: 100%; background: var(--import-colour); box-shadow: 0 0 10px color-mix(in srgb, var(--import-colour) 65%, transparent); transition: width 0.12s ease-out; }
 
+.pl-library-tree { gap: 2px; }
+.pl-library-folder {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 27px;
+  border: 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  background: rgba(255,255,255,0.025);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.pl-library-folder:hover { background: rgba(255,107,61,0.12); color: var(--accent); }
+.pl-library-folder small { margin-left: auto; padding-right: 9px; color: var(--text-dim); font-size: 9px; }
+.pl-library-caret { width: 11px; color: var(--accent); }
+.pl-library-playlist { min-height: 31px; border-left: 1px solid rgba(255,107,61,0.28); }
+
 @keyframes deckLoadWarningIn {
   from { opacity: 0; transform: translate(-50%, -8px); }
   to { opacity: 1; transform: translate(-50%, 0); }

@@ -72,6 +72,7 @@ function PlaylistModal({
   const [saveName, setSaveName] = useState("");
   const [savedPlaylists, setSavedPlaylists] = useState(() => loadSavedPlaylists());
   const [libraryPlaylists, setLibraryPlaylists] = useState([]);
+  const [libraryCollapsed, setLibraryCollapsed] = useState(() => new Set());
   // Reconcile state for loading: when user picks a saved set, we need files from disk.
   // shape: { id, name, tracks: [...names], pickedFiles: Map<lower(name), File>, missing: [names] }
   const [reconcile, setReconcile] = useState(null);
@@ -160,6 +161,32 @@ function PlaylistModal({
       return acc + (durations[key] || 0);
     }, 0);
   }, [durations, state.playlist.length, deckKey, state.playlist.join("|")]);
+
+  const libraryRows = useMemo(() => {
+    const root = { path: "", name: "LIBRARY", children: new Map(), playlist: null };
+    libraryPlaylists.forEach((playlist) => {
+      const parts = String(playlist.path || playlist.name || "Untitled")
+        .split(" / ").map((part) => part.trim()).filter(Boolean).filter((part) => part !== "ROOT");
+      let node = root;
+      parts.forEach((part) => {
+        const path = node.path ? `${node.path} / ${part}` : part;
+        if (!node.children.has(part)) node.children.set(part, { path, name: part, children: new Map(), playlist: null });
+        node = node.children.get(part);
+      });
+      node.playlist = playlist;
+    });
+    const rows = [];
+    const walk = (node, depth) => {
+      Array.from(node.children.values()).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })).forEach((child) => {
+        const hasChildren = child.children.size > 0;
+        rows.push({ kind: hasChildren ? "folder" : "playlist", node: child, depth });
+        if (!libraryCollapsed.has(child.path)) walk(child, depth + 1);
+        if (child.playlist && hasChildren) rows.push({ kind: "playlist", node: child, depth: depth + 1 });
+      });
+    };
+    walk(root, 0);
+    return rows;
+  }, [libraryPlaylists, libraryCollapsed]);
 
   const onLoad = async (i, play = true) => {
     if (!engDeck) return;
@@ -827,14 +854,25 @@ function PlaylistModal({
               {libraryPlaylists.length === 0 ? (
                 <div className="pl-empty"><div className="pl-empty-icon">⌘</div><div className="pl-empty-title">No playlists imported</div><div className="pl-empty-sub">Import one or more Rekordbox XML exports to build your library.</div></div>
               ) : (
-                <div className="pl-saved-list">
-                  {libraryPlaylists.map((playlist) => (
-                    <div key={playlist.id} className="pl-saved-row">
+                <div className="pl-saved-list pl-library-tree">
+                  {libraryRows.map(({ kind, node, depth }) => kind === "folder" ? (
+                    <button key={`folder:${node.path}`} className="pl-library-folder" style={{ paddingLeft: `${10 + depth * 18}px` }}
+                      onClick={() => setLibraryCollapsed((current) => {
+                        const next = new Set(current);
+                        if (next.has(node.path)) next.delete(node.path); else next.add(node.path);
+                        return next;
+                      })}>
+                      <span className="pl-library-caret">{libraryCollapsed.has(node.path) ? "▸" : "▾"}</span>
+                      <strong>{node.name}</strong>
+                      <small>{node.children.size} {node.children.size === 1 ? "playlist" : "playlists"}</small>
+                    </button>
+                  ) : (
+                    <div key={`playlist:${node.playlist?.id || node.path}`} className="pl-saved-row pl-library-playlist" style={{ marginLeft: `${depth * 18}px` }}>
                       <div className="pl-saved-info">
-                        <strong className="pl-saved-name">{playlist.name}</strong>
-                        <div className="pl-saved-meta"><span className="pl-saved-deck a">{playlist.source === "rekordbox" ? "REKORDBOX" : "LOCAL"}</span><span>{playlist.tracks?.length || 0} tracks</span><span>{playlist.path || "Root"}</span></div>
+                        <strong className="pl-saved-name">♫ {node.playlist?.name || node.name}</strong>
+                        <div className="pl-saved-meta"><span className="pl-saved-deck a">{node.playlist?.source === "rekordbox" ? "REKORDBOX" : "LOCAL"}</span><span>{node.playlist?.tracks?.length || 0} tracks</span></div>
                       </div>
-                      <div className="pl-saved-actions"><button className="pl-action primary" onClick={() => beginReconcile(playlist)}>LOAD →</button></div>
+                      <div className="pl-saved-actions"><button className="pl-action primary" onClick={() => beginReconcile(node.playlist)}>LOAD →</button></div>
                     </div>
                   ))}
                 </div>
