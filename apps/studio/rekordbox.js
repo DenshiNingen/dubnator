@@ -61,6 +61,26 @@
     return { tracks: Array.from(tracks.values()), playlists };
   }
 
+  // Merge several exports into one catalogue while keeping folder paths. A
+  // playlist path is the stable identity; duplicate track references are
+  // de-duplicated by TrackID when sources overlap.
+  function combine(sources) {
+    const tracks = new Map();
+    const playlists = new Map();
+    Array.from(sources || []).forEach((source, sourceIndex) => {
+      (source?.tracks || []).forEach((track) => {
+        const key = track.id || `${track.path}|${track.fileName}`;
+        if (!tracks.has(key)) tracks.set(key, track);
+      });
+      (source?.playlists || []).forEach((playlist) => {
+        const basePath = playlist.path || playlist.name || "Untitled";
+        const path = playlists.has(basePath) ? `${basePath} · XML ${sourceIndex + 1}` : basePath;
+        playlists.set(path, { ...playlist, path, sourceIndex });
+      });
+    });
+    return { tracks: Array.from(tracks.values()), playlists: Array.from(playlists.values()) };
+  }
+
   function aliasesForFile(file) {
     const relative = file?.webkitRelativePath || "";
     return new Set([
@@ -100,5 +120,5 @@
     };
   }
 
-  window.DubnatorRekordbox = { parse, matchPlaylistFiles, decodedPath, baseName, normalize };
+  window.DubnatorRekordbox = { parse, combine, matchPlaylistFiles, decodedPath, baseName, normalize };
 })();

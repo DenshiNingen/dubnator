@@ -71,6 +71,7 @@ function PlaylistModal({
   const [saveNameOpen, setSaveNameOpen] = useState(false);
   const [saveName, setSaveName] = useState("");
   const [savedPlaylists, setSavedPlaylists] = useState(() => loadSavedPlaylists());
+  const [libraryPlaylists, setLibraryPlaylists] = useState([]);
   // Reconcile state for loading: when user picks a saved set, we need files from disk.
   // shape: { id, name, tracks: [...names], pickedFiles: Map<lower(name), File>, missing: [names] }
   const [reconcile, setReconcile] = useState(null);
@@ -81,6 +82,17 @@ function PlaylistModal({
     setToast({ msg, kind });
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 2400);
+  };
+
+  useEffect(() => {
+    if (!open || !window.DubnatorLibraryStore?.load) return;
+    window.DubnatorLibraryStore.load().then((catalogue) => {
+      if (catalogue?.playlists) setLibraryPlaylists(catalogue.playlists);
+    }).catch(() => {});
+  }, [open]);
+  const persistLibrary = (playlists) => {
+    setLibraryPlaylists(playlists);
+    window.DubnatorLibraryStore?.save({ playlists });
   };
 
   const isA = deckKey === "A";
@@ -240,6 +252,10 @@ function PlaylistModal({
   const openLoadView = () => {
     refreshSaved();
     setView("saved");
+    setReconcile(null);
+  };
+  const openLibraryView = () => {
+    setView("library");
     setReconcile(null);
   };
   const closeLoadView = () => {
@@ -494,26 +510,39 @@ function PlaylistModal({
   };
   const onImportInput = (e) => { importBundle(e.target.files?.[0]); e.target.value = ""; };
 
-  const importRekordboxXml = async (file) => {
-    if (!file || !rekordbox?.parse) return;
+  const importRekordboxXmls = async (filesInput) => {
+    const files = Array.from(filesInput || []).filter((file) => file.name?.toLowerCase().endsWith(".xml"));
+    if (!files.length || !rekordbox?.parse) return;
     try {
-      const parsed = rekordbox.parse(await file.text());
-      if (!parsed.playlists.length) throw new Error("No playlists found");
-      setRekordboxImport({
-        sourceName: file.name,
-        playlists: parsed.playlists,
-        selectedPath: parsed.playlists[0].path,
-      });
+      const parsedSources = await Promise.all(files.map(async (file) => ({ name: file.name, parsed: rekordbox.parse(await file.text()) })));
+      const combined = rekordbox.combine
+        ? rekordbox.combine(parsedSources.map((source) => source.parsed))
+        : parsedSources[0].parsed;
+      if (!combined.playlists.length) throw new Error("No playlists found");
+      const imported = combined.playlists.map((playlist, index) => ({
+        id: `rb_${Date.now().toString(36)}_${index}_${Math.random().toString(36).slice(2, 6)}`,
+        name: playlist.name,
+        path: playlist.path,
+        source: "rekordbox",
+        sources: files.map((file) => file.name),
+        tracks: playlist.tracks.map((track) => track.fileName || track.name),
+        trackRefs: playlist.tracks,
+        created: Date.now(),
+      }));
+      const existing = new Map(libraryPlaylists.map((playlist) => [playlist.path, playlist]));
+      imported.forEach((playlist) => existing.set(playlist.path, playlist));
+      persistLibrary(Array.from(existing.values()));
+      setRekordboxImport({ sourceName: files.map((file) => file.name).join(", "), playlists: combined.playlists, selectedPath: combined.playlists[0].path });
       setReconcile(null);
       setView("rekordbox");
-      showToast(`Read ${parsed.playlists.length} Rekordbox playlist${parsed.playlists.length === 1 ? "" : "s"}`, "ok");
+      showToast(`Imported ${imported.length} playlist${imported.length === 1 ? "" : "s"} from ${files.length} XML${files.length === 1 ? "" : "s"}`, "ok");
     } catch (error) {
       console.error("Rekordbox import failed", error);
       showToast(error?.message || "Could not read Rekordbox XML", "warn");
     }
   };
   const onRekordboxInput = (event) => {
-    importRekordboxXml(event.target.files?.[0]);
+    importRekordboxXmls(event.target.files);
     event.target.value = "";
   };
 
@@ -659,6 +688,7 @@ function PlaylistModal({
             <span className="pl-stats-now">
               {view === "saved"
                 ? "BROWSING SAVED PLAYLISTS"
+                : view === "library" ? "BROWSING PLAYLIST LIBRARY"
                 : view === "rekordbox" ? "IMPORTING REKORDBOX ORDER"
                 : files.length > 0 ? `Now: ${String(curIdx + 1).padStart(2, "0")} / ${String(files.length).padStart(2, "0")}` : "— empty —"}
             </span>
@@ -771,15 +801,43 @@ function PlaylistModal({
                 </label>
                 <button className="pl-action" onClick={onShuffle} disabled={files.length < 2}>SHUFFLE</button>
                 <button className="pl-action" onClick={openSavePrompt} disabled={files.length === 0}>SAVE</button>
-                <button className="pl-action" onClick={openLoadView}>LOAD…</button>
+                <button className="pl-action" onClick={openLoadView}>SAVED…</button>
+                <button className="pl-action" onClick={openLibraryView}>LIBRARY…</button>
                 <label className="pl-action rekordbox-action" title="Import playlist order from a Rekordbox XML export">
                   REKORDBOX XML
-                  <input type="file" className="hidden" accept=".xml,text/xml,application/xml" onChange={onRekordboxInput} />
+                  <input type="file" className="hidden" accept=".xml,text/xml,application/xml" multiple onChange={onRekordboxInput} />
                 </label>
                 <button className="pl-action danger" onClick={onClear} disabled={files.length === 0}>CLEAR</button>
                 <span className="pl-footer-hint">Drop audio files · 2× click row to load · ESC closes</span>
               </div>
             </React.Fragment>
+          ) : view === "library" ? (
+            <div className="pl-saved">
+              <div className="pl-saved-head">
+                <span className="pl-saved-title">Playlist Library</span>
+                <span className="pl-saved-count">{libraryPlaylists.length} playlists</span>
+                <label className="pl-action" style={{ marginLeft: "auto" }}>
+                  IMPORT XMLS
+                  <input type="file" className="hidden" accept=".xml,text/xml,application/xml" multiple onChange={onRekordboxInput} />
+                </label>
+              </div>
+              {libraryPlaylists.length === 0 ? (
+                <div className="pl-empty"><div className="pl-empty-icon">⌘</div><div className="pl-empty-title">No playlists imported</div><div className="pl-empty-sub">Import one or more Rekordbox XML exports to build your library.</div></div>
+              ) : (
+                <div className="pl-saved-list">
+                  {libraryPlaylists.map((playlist) => (
+                    <div key={playlist.id} className="pl-saved-row">
+                      <div className="pl-saved-info">
+                        <strong className="pl-saved-name">{playlist.name}</strong>
+                        <div className="pl-saved-meta"><span className="pl-saved-deck a">{playlist.source === "rekordbox" ? "REKORDBOX" : "LOCAL"}</span><span>{playlist.tracks?.length || 0} tracks</span><span>{playlist.path || "Root"}</span></div>
+                      </div>
+                      <div className="pl-saved-actions"><button className="pl-action primary" onClick={() => beginReconcile(playlist)}>LOAD →</button></div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="pl-footer"><button className="pl-action" onClick={closeLoadView}>← BACK TO {label}</button><span className="pl-footer-hint">XML playlists are kept locally · audio files are matched when loaded</span></div>
+            </div>
           ) : view === "saved" ? (
             // === SAVED PLAYLISTS VIEW ===
             <div className="pl-saved">
@@ -915,7 +973,7 @@ function PlaylistModal({
                 </span>
                 <label className="pl-action" style={{ marginLeft: "auto" }}>
                   CHOOSE OTHER XML
-                  <input type="file" className="hidden" accept=".xml,text/xml,application/xml" onChange={onRekordboxInput} />
+                  <input type="file" className="hidden" accept=".xml,text/xml,application/xml" multiple onChange={onRekordboxInput} />
                 </label>
               </div>
               <div className="rb-browser">

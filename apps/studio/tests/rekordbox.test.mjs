@@ -46,3 +46,9 @@ test("duplicate filenames consume separate local files once", () => {
   assert.equal(result.ordered.length, 2);
   assert.notEqual(result.ordered[0], result.ordered[1]);
 });
+
+test("combines multiple XML exports and disambiguates duplicate playlist paths", () => {
+  assert.match(source, /function combine\(sources\)/);
+  assert.match(source, /XML \$\{sourceIndex \+ 1\}/);
+  assert.match(source, /window\.DubnatorRekordbox = \{ parse, combine/);
+});
