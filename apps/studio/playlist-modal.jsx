@@ -55,6 +55,7 @@ function PlaylistModal({
   playlistsLinked,
   onTogglePlaylistLink,
   onPlaylistChange,
+  onImportProgress,
   onClose,
   onSwitchDeck,
 }) {
@@ -568,7 +569,12 @@ function PlaylistModal({
     if (!files.length || !engDeck) return;
     const wasEmpty = engDeck.playlist.length === 0;
     if (wasEmpty && canReplaceDeckTrack && !canReplaceDeckTrack(deckKey)) return;
-    files.forEach(f => engDeck.addToPlaylist(f));
+    onImportProgress?.({ deckKey, done: 0, total: files.length });
+    for (let i = 0; i < files.length; i += 32) {
+      files.slice(i, i + 32).forEach((file) => engDeck.addToPlaylist(file));
+      onImportProgress?.({ deckKey, done: Math.min(i + 32, files.length), total: files.length });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
     onPlaylistChange?.(deckKey);
     if (wasEmpty) {
       await engDeck.loadPlaylistIndex(0);
@@ -584,6 +590,7 @@ function PlaylistModal({
         playlist: engDeck.playlist.map(f => f.name),
       }));
     }
+    onImportProgress?.(null);
   };
   const onFileInput = (e) => { onAdd(e.target.files); e.target.value = ""; };
   const onDragOver = (e) => { e.preventDefault(); setDragOver(true); };

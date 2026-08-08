@@ -757,6 +757,7 @@ function App() {
   });
   const [deckLoadWarning, setDeckLoadWarning] = useState(null);
   const deckLoadWarningTimerRef = useRef(null);
+  const [playlistImportProgress, setPlaylistImportProgress] = useState(null);
 
   // === aux/mic inputs (visual; mic permission could wire IN3-4) ===
   const [inputs, setInputs] = useState({
@@ -2442,7 +2443,12 @@ function App() {
     const shouldLoad = opts.load || !engDeck.buffer;
     if (shouldLoad && !canReplaceDeckTrack(deckKey)) return false;
     const startIdx = engDeck.playlist.length; // index of the first newly-added file
-    files.forEach(f => engDeck.addToPlaylist(f));
+    setPlaylistImportProgress({ deckKey, done: 0, total: files.length });
+    for (let i = 0; i < files.length; i += 32) {
+      files.slice(i, i + 32).forEach((file) => engDeck.addToPlaylist(file));
+      setPlaylistImportProgress({ deckKey, done: Math.min(i + 32, files.length), total: files.length });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
     syncLinkedPlaylist(deckKey);
     // Cue the dropped/loaded track when the deck is empty, or when the caller
     // forces it (an explicit drop onto a deck loads that track immediately).
@@ -2457,6 +2463,7 @@ function App() {
     } else {
       setDeck((s) => ({ ...s, playlist: engDeck.playlist.map((file) => file.name) }));
     }
+    setPlaylistImportProgress(null);
     return true;
   };
   const onFileA = (e) => {
@@ -3442,6 +3449,7 @@ function App() {
           playlistsLinked={playlistsLinked}
           onTogglePlaylistLink={(next) => togglePlaylistLink(next, playlistOpen || activeDeck)}
           onPlaylistChange={(deckKey) => syncLinkedPlaylist(deckKey)}
+          onImportProgress={setPlaylistImportProgress}
           onClose={() => setPlaylistOpen(null)}
           onSwitchDeck={(d) => { setActiveDeck(d); setPlaylistOpen(d); }}
         />
@@ -3453,6 +3461,17 @@ function App() {
             onClick={() => setDeckLoadWarning(null)}>
             <span className="deck-load-warning-icon">!</span>
             <span>{deckLoadWarning.message}</span>
+          </div>,
+          document.body
+        )}
+
+        {playlistImportProgress && ReactDOM.createPortal(
+          <div className={`playlist-import-progress deck-${playlistImportProgress.deckKey.toLowerCase()}`} role="status" aria-live="polite">
+            <div className="playlist-import-progress-head">
+              <span>LOADING {playlistImportProgress.deckKey === "A" ? "DECK-A" : "DECK-B"} PLAYLIST</span>
+              <strong>{playlistImportProgress.done}/{playlistImportProgress.total}</strong>
+            </div>
+            <div className="playlist-import-progress-track"><i style={{ width: `${playlistImportProgress.total ? (playlistImportProgress.done / playlistImportProgress.total) * 100 : 0}%` }} /></div>
           </div>,
           document.body
         )}

@@ -1035,6 +1035,32 @@ input.midi-learning { animation: midiLearnPulse 0.6s ease-in-out infinite; }
   font-size: 14px;
 }
 
+.playlist-import-progress {
+  --import-colour: var(--deck-a, #ff6b3d);
+  position: fixed;
+  top: max(18px, env(safe-area-inset-top));
+  left: 50%;
+  z-index: 2190;
+  width: min(360px, calc(100vw - 28px));
+  padding: 10px 12px;
+  transform: translateX(-50%);
+  border: 1px solid color-mix(in srgb, var(--import-colour) 70%, #20242b);
+  border-radius: 3px;
+  background: linear-gradient(180deg, #191d23, #090b0e);
+  color: var(--text);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.75), 0 0 14px color-mix(in srgb, var(--import-colour) 22%, transparent);
+  animation: deckLoadWarningIn 0.18s ease;
+}
+
+.playlist-import-progress.deck-b { --import-colour: var(--deck-b, #3da9ff); }
+.playlist-import-progress-head { display: flex; justify-content: space-between; gap: 12px; color: var(--import-colour); }
+.playlist-import-progress-head strong { color: var(--text); }
+.playlist-import-progress-track { height: 5px; margin-top: 8px; overflow: hidden; border: 1px solid #303640; background: #080a0d; }
+.playlist-import-progress-track i { display: block; height: 100%; background: var(--import-colour); box-shadow: 0 0 10px color-mix(in srgb, var(--import-colour) 65%, transparent); transition: width 0.12s ease-out; }
+
 @keyframes deckLoadWarningIn {
   from { opacity: 0; transform: translate(-50%, -8px); }
   to { opacity: 1; transform: translate(-50%, 0); }
