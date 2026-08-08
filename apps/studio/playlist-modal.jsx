@@ -264,6 +264,9 @@ function PlaylistModal({
   };
 
   const beginReconcile = (entry) => {
+    // Reuse the existing file-reconciliation surface for both saved and
+    // imported library playlists.
+    setView("saved");
     setReconcile({
       id: entry.id,
       name: entry.name,
