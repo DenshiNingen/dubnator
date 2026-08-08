@@ -37,12 +37,28 @@
 
   function save(deck, files) {
     const list = Array.from(files || []).filter(Boolean);
-    return transaction(deck, "readwrite", (store, key) => store.put(list, key));
+    // Safari/WebKit can restore a structured-cloned File as a Blob (losing its
+    // name). Store a tiny envelope so reloads always reconstruct usable Files.
+    const records = list.map((file) => ({
+      name: file.name || "track",
+      type: file.type || "application/octet-stream",
+      lastModified: Number(file.lastModified) || 0,
+      blob: file,
+    }));
+    return transaction(deck, "readwrite", (store, key) => store.put(records, key));
   }
   function load(deck) {
-    return transaction(deck, "readonly", (store, key) => store.get(key)).then((files) => (
-      Array.isArray(files) ? files : []
-    ));
+    return transaction(deck, "readonly", (store, key) => store.get(key)).then((records) => {
+      if (!Array.isArray(records)) return [];
+      return records.map((record) => {
+        // Migrate the original v1 format, which stored the File directly.
+        if (!record || !record.blob) return record;
+        try {
+          if (typeof File === "function") return new File([record.blob], record.name, { type: record.type, lastModified: record.lastModified });
+        } catch (_) {}
+        return record.blob;
+      }).filter(Boolean);
+    });
   }
   function clear(deck) {
     return transaction(deck, "readwrite", (store, key) => store.delete(key));

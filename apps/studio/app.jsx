@@ -1152,6 +1152,7 @@ function App() {
     const dataA = new Uint8Array(eng.deckA.analyser.fftSize);
     const dataB = new Uint8Array(eng.deckB.analyser.fftSize);
     const dataM = new Uint8Array(eng.masterAnalyser.fftSize);
+    const lastTransport = { A: null, B: null };
     const tick = (now) => {
       raf = requestAnimationFrame(tick);
       if (document.hidden || now - lastFrame < METER_FRAME_MS) return;
@@ -1217,6 +1218,22 @@ function App() {
         time: eng.deckB.getCurrentTime(), dur: eng.deckB.getDuration(),
         playing: eng.deckB.playing, cued: eng.deckB.hasCue(),
       });
+      // Keep the non-expanded rack and playlist modal in sync with the engine
+      // too. Transport actions are intentionally imperative, so relying only
+      // on their click handlers left UI state stale after seek/auto-advance.
+      for (const [key, deck, setter] of [["A", eng.deckA, setDeckA], ["B", eng.deckB, setDeckB]]) {
+        const next = `${deck.playing ? 1 : 0}:${deck.hasCue() ? 1 : 0}:${deck.playlistIdx}:${deck.name}`;
+        if (lastTransport[key] !== next) {
+          lastTransport[key] = next;
+          setter((state) => ({
+            ...state,
+            playing: deck.playing,
+            cued: deck.hasCue(),
+            playlistIdx: deck.playlistIdx,
+            name: deck.name || state.name,
+          }));
+        }
+      }
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
@@ -1224,10 +1241,10 @@ function App() {
 
   // Don't start file playback on a deck that's the live line-input source (it
   // would stack the buffer onto the live input at deck.input and mix).
-  const playA = async () => { await init(); if (eng.canDeckPlay && !eng.canDeckPlay("A")) return; eng.deckA.playing ? eng.deckA.pause() : eng.deckA.play(); };
-  const playB = async () => { await init(); if (eng.canDeckPlay && !eng.canDeckPlay("B")) return; eng.deckB.playing ? eng.deckB.pause() : eng.deckB.play(); };
-  const stopA = () => eng.deckA && eng.deckA.stop();
-  const stopB = () => eng.deckB && eng.deckB.stop();
+  const playA = async () => { await init(); if (eng.canDeckPlay && !eng.canDeckPlay("A")) return; eng.deckA.playing ? eng.deckA.pause() : eng.deckA.play(); setDeckA((s) => ({ ...s, playing: eng.deckA.playing })); };
+  const playB = async () => { await init(); if (eng.canDeckPlay && !eng.canDeckPlay("B")) return; eng.deckB.playing ? eng.deckB.pause() : eng.deckB.play(); setDeckB((s) => ({ ...s, playing: eng.deckB.playing })); };
+  const stopA = () => { if (!eng.deckA) return; eng.deckA.stop(); setDeckA((s) => ({ ...s, playing: false, time: 0 })); };
+  const stopB = () => { if (!eng.deckB) return; eng.deckB.stop(); setDeckB((s) => ({ ...s, playing: false, time: 0 })); };
 
   const triggerSample = (i) => {
     // Fire the sound synchronously inside the key/pointer handler when the engine
@@ -2463,10 +2480,10 @@ function App() {
     loopInArmed: false,
     loopBeats: null,
   };
-  const nextTrackA = async () => { await init(); if (!canReplaceDeckTrack("A")) return; await eng.deckA.nextTrack(); setDeckA(s => ({ ...s, ...LOOP_RESET, playlistIdx: eng.deckA.playlistIdx, name: eng.deckA.name })); };
-  const prevTrackA = async () => { await init(); if (!canReplaceDeckTrack("A")) return; await eng.deckA.prevTrack(); setDeckA(s => ({ ...s, ...LOOP_RESET, playlistIdx: eng.deckA.playlistIdx, name: eng.deckA.name })); };
-  const nextTrackB = async () => { await init(); if (!canReplaceDeckTrack("B")) return; await eng.deckB.nextTrack(); setDeckB(s => ({ ...s, ...LOOP_RESET, playlistIdx: eng.deckB.playlistIdx, name: eng.deckB.name })); };
-  const prevTrackB = async () => { await init(); if (!canReplaceDeckTrack("B")) return; await eng.deckB.prevTrack(); setDeckB(s => ({ ...s, ...LOOP_RESET, playlistIdx: eng.deckB.playlistIdx, name: eng.deckB.name })); };
+  const nextTrackA = async () => { await init(); if (!canReplaceDeckTrack("A")) return; await eng.deckA.nextTrack(); setDeckA(s => ({ ...s, ...LOOP_RESET, playlistIdx: eng.deckA.playlistIdx, name: eng.deckA.name, playing: eng.deckA.playing, time: 0, dur: eng.deckA.getDuration() })); };
+  const prevTrackA = async () => { await init(); if (!canReplaceDeckTrack("A")) return; await eng.deckA.prevTrack(); setDeckA(s => ({ ...s, ...LOOP_RESET, playlistIdx: eng.deckA.playlistIdx, name: eng.deckA.name, playing: eng.deckA.playing, time: 0, dur: eng.deckA.getDuration() })); };
+  const nextTrackB = async () => { await init(); if (!canReplaceDeckTrack("B")) return; await eng.deckB.nextTrack(); setDeckB(s => ({ ...s, ...LOOP_RESET, playlistIdx: eng.deckB.playlistIdx, name: eng.deckB.name, playing: eng.deckB.playing, time: 0, dur: eng.deckB.getDuration() })); };
+  const prevTrackB = async () => { await init(); if (!canReplaceDeckTrack("B")) return; await eng.deckB.prevTrack(); setDeckB(s => ({ ...s, ...LOOP_RESET, playlistIdx: eng.deckB.playlistIdx, name: eng.deckB.name, playing: eng.deckB.playing, time: 0, dur: eng.deckB.getDuration() })); };
   // Load the currently-highlighted playlist track into a deck and start it (the
   // keyboard "Load & Play" shortcut). Falls back to the file picker when empty.
   const loadAndPlay = (which) => async () => {

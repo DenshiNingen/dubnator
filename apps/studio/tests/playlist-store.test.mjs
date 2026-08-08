@@ -18,7 +18,8 @@ test("playlist store exposes a safe empty fallback without IndexedDB", async () 
 test("playlist store keeps audio files in a versioned IndexedDB object store", () => {
   assert.match(source, /dubnator-library/);
   assert.match(source, /createObjectStore\(STORE\)/);
-  assert.match(source, /store\.put\(list, key\)/);
+  assert.match(source, /store\.put\(records, key\)/);
   assert.match(source, /store\.get\(key\)/);
+  assert.match(source, /new File\(\[record\.blob\]/);
   assert.match(source, /objectStore\(STORE\)\.clear\(\)/);
 });

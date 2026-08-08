@@ -245,6 +245,10 @@
       // section loop (in/out) — 0/0 = no region
       this.loopA = 0;
       this.loopB = 0;
+      // BufferSource.onended is asynchronous. Keep source identity local so a
+      // late callback from a stopped/seeked source can never clear or advance
+      // the newer source that replaced it.
+      this.source = null;
     }
     setPan(v) { this.panner.pan.setTargetAtTime(v, this.ctx.currentTime, 0.01); }
     setAutoGain(on) { this.autoGain.gain.setTargetAtTime(on ? 1.7 : 1, this.ctx.currentTime, 0.05); }
@@ -406,21 +410,24 @@
 
     play() {
       if (!this.buffer || this.playing) return;
-      this._manualStop = false; // fresh playback; a prior stop must not leak through
-      this.source = this.ctx.createBufferSource();
-      this.source.buffer = this.buffer;
+      const source = this.ctx.createBufferSource();
+      this.source = source;
+      source.buffer = this.buffer;
       // loopSingle (default) loops the track forever; when off, the track plays
       // through once and onended fires so the deck can auto-advance a playlist.
-      this.source.loop = this.loopSingle !== false;
+      source.loop = this.loopSingle !== false;
       // Section loop (loop in/out): if a region is set, loop just that part.
       if (this.loopB > this.loopA) {
-        this.source.loopStart = this.loopA;
-        this.source.loopEnd = this.loopB;
-        this.source.loop = true;
-      }
-      this.source.connect(this.input);
-      this.source.onended = () => {
-        if (this._manualStop) { this._manualStop = false; return; }
+          source.loopStart = this.loopA;
+          source.loopEnd = this.loopB;
+          source.loop = true;
+        }
+      source.connect(this.input);
+      source.onended = () => {
+        // A previous source may finish after seek()/pause() has already
+        // started a replacement. Its callback is no longer authoritative.
+        if (this.source !== source) return;
+        if (source._dubManualStop) return;
         if (this.loopSingle === false) {
           this.playing = false;
           this.source = null;
@@ -428,7 +435,7 @@
           if (typeof this.onTrackEnd === "function") this.onTrackEnd();
         }
       };
-      this.source.start(0, this.offset % this.buffer.duration);
+      source.start(0, this.offset % this.buffer.duration);
       this.startedAt = this.ctx.currentTime;
       this.playing = true;
     }
@@ -457,7 +464,7 @@
       this.offset =
         (this.offset + (this.ctx.currentTime - this.startedAt)) %
         this.buffer.duration;
-      this._manualStop = true; // suppress the onended auto-advance
+      this.source._dubManualStop = true; // suppress the onended auto-advance
       try {
         this.source.stop();
       } catch (e) {}
@@ -467,7 +474,7 @@
 
     stop() {
       if (this.source) {
-        this._manualStop = true; // suppress the onended auto-advance
+        this.source._dubManualStop = true; // suppress the onended auto-advance
         try {
           this.source.stop();
         } catch (e) {}

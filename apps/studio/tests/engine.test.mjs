@@ -315,6 +315,16 @@ section("playlist auto-advance (loop vs play-through + onTrackEnd)");
   eng.deckA.stop();
   src.onended(); // the stop()'s source.stop would fire this in a real ctx
   ok(advanced === 1, "manual stop suppresses auto-advance");
+  // A seek while playing replaces the BufferSource. The old source's delayed
+  // onended callback must not clear the new source or advance the playlist.
+  eng.deckA.play();
+  const oldSource = eng.deckA.source;
+  eng.deckA.seek(0.25);
+  const replacement = eng.deckA.source;
+  oldSource.onended();
+  ok(replacement !== oldSource && eng.deckA.source === replacement && eng.deckA.playing,
+    "late onended from a seeked source cannot interrupt the replacement");
+  eng.deckA.stop();
   eng.deckA.setLoopSingle(true);
   eng.deckA.onTrackEnd = null;
 
