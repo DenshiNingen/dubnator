@@ -10,6 +10,8 @@
   const LIVE_MODE = [...SYSEX, 0x0e, 0x00, 0xf7];
   const FEEDBACK_EXTERNAL_ONLY = [...SYSEX, 0x0a, 0x00, 0x01, 0xf7];
   const BRIGHTNESS_LEVELS = [0, 18, 36, 54, 73, 91, 109, 127];
+  const LED_STATIC = 0;
+  const LED_PULSE = 2;
   const SINGLE_ROLE_HOLD_MS = 450;
   const SINGLE_ROLE_BUTTONS = { 2: 0, 3: 1 }; // Physical top-row ← / →.
 
@@ -1113,11 +1115,18 @@
       if (this.animationActive) return;
       const layout = this._layout(device);
       const leds = new Map();
+      const ledModes = new Map();
+      const deckAPlaying = Number(this.values["deckA.play"]) > 0.5;
+      const deckBPlaying = Number(this.values["deckB.play"]) > 0.5;
 
       for (let i = 0; i < 8; i++) {
         const tone = this.pages[device.role][i].tone;
         const colours = PALETTES[tone] || PALETTES.neutral;
-        leds.set(orientedTopNote(device.orientation, i), i === device.page ? colours.bright : colours.dim);
+        const deckPlaying = device.role === 0
+          && ((i === 1 && deckAPlaying) || (i === 2 && deckBPlaying));
+        const note = orientedTopNote(device.orientation, i);
+        leds.set(note, deckPlaying || i === device.page ? colours.bright : colours.dim);
+        if (deckPlaying) ledModes.set(note, LED_PULSE);
       }
       if (this.devices.length === 1 && device.roleHold) {
         leds.set(orientedTopNote(device.orientation, device.roleHold.index), PALETTES.neutral.bright);
@@ -1139,7 +1148,12 @@
       for (let row = 0; row < 8; row++) {
         const id = layout.sideButtons[row];
         const colours = id ? paletteForControl(id, layout.page.colour) : null;
-        leds.set(orientedSideNote(device.orientation, row), id ? this._buttonColour(id, colours) : 0);
+        const note = orientedSideNote(device.orientation, row);
+        leds.set(note, id ? this._buttonColour(id, colours) : 0);
+        if (device.role === 0 && layout.page.name === "MIX"
+          && ((id === "deckA.play" && deckAPlaying) || (id === "deckB.play" && deckBPlaying))) {
+          ledModes.set(note, LED_PULSE);
+        }
       }
       // Explicitly clear every unused grid cell.
       for (let row = 0; row < 8; row++) {
@@ -1150,10 +1164,10 @@
       }
 
       const ordered = [...leds.entries()].sort((a, b) => a[0] - b[0]);
-      const signature = ordered.map(([index, colour]) => `${index}:${colour}`).join(",");
+      const signature = ordered.map(([index, colour]) => `${index}:${ledModes.get(index) || LED_STATIC}:${colour}`).join(",");
       if (!force && signature === device.lastFrame) return;
       device.lastFrame = signature;
-      const specs = ordered.flatMap(([index, colour]) => [0, index, colour]);
+      const specs = ordered.flatMap(([index, colour]) => [ledModes.get(index) || LED_STATIC, index, colour]);
       this.send(device.outputId, [...SYSEX, 0x03, ...specs, 0xf7]);
     }
 
@@ -1164,6 +1178,8 @@
     PROGRAMMER_MODE,
     LIVE_MODE,
     BRIGHTNESS_LEVELS,
+    LED_STATIC,
+    LED_PULSE,
     LEFT_PAGES,
     RIGHT_PAGES,
     PALETTES,

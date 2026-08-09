@@ -20,6 +20,8 @@ const echoTiming = sandbox.window.DubnatorEchoTiming;
 const {
   LaunchpadMiniMk3Manager,
   BRIGHTNESS_LEVELS,
+  LED_STATIC,
+  LED_PULSE,
   PALETTES,
   PROGRAMMER_MODE,
   brightnessMessage,
@@ -83,6 +85,13 @@ function fakeScheduler() {
 function frameColour(message, led) {
   for (let index = 7; index < message.length - 1; index += 3) {
     if (message[index + 1] === led) return message[index + 2];
+  }
+  return null;
+}
+
+function frameMode(message, led) {
+  for (let index = 7; index < message.length - 1; index += 3) {
+    if (message[index + 1] === led) return message[index];
   }
   return null;
 }
@@ -909,6 +918,30 @@ test("LED feedback is stateful, batched and de-duplicated", () => {
   sent.length = 0;
   manager.sync({ "deckA.gain": 1, "echo.send": 0.5 });
   assert.equal(sent.length, 0);
+});
+
+test("playing decks pulse their MIX transport and page LEDs in hardware", () => {
+  const { manager, sent } = setup();
+  manager.sync({ "deckA.play": 1, "deckB.play": 1 });
+
+  const leftFrame = sent.filter(({ outputId, message }) => outputId === "out-a" && message[6] === 3).at(-1).message;
+  assert.equal(frameMode(leftFrame, orientedTopNote("normal", 1)), LED_PULSE, "Deck A top page button pulses");
+  assert.equal(frameMode(leftFrame, orientedTopNote("normal", 2)), LED_PULSE, "Deck B top page button pulses");
+  assert.equal(frameMode(leftFrame, sideNote(0)), LED_PULSE, "Deck A MIX play button pulses");
+  assert.equal(frameMode(leftFrame, sideNote(1)), LED_PULSE, "Deck B MIX play button pulses");
+  assert.equal(frameColour(leftFrame, sideNote(0)), PALETTES.green.bright);
+  assert.equal(frameColour(leftFrame, sideNote(1)), PALETTES.green.bright);
+
+  const rightFrame = sent.filter(({ outputId, message }) => outputId === "out-b" && message[6] === 3).at(-1).message;
+  assert.equal(frameMode(rightFrame, orientedTopNote("normal", 1)), LED_STATIC, "FX page buttons remain static");
+  assert.equal(frameMode(rightFrame, orientedTopNote("normal", 2)), LED_STATIC, "FX page buttons remain static");
+
+  manager.sync({ "deckA.play": 0, "deckB.play": 0 });
+  const stoppedFrame = sent.filter(({ outputId, message }) => outputId === "out-a" && message[6] === 3).at(-1).message;
+  assert.equal(frameMode(stoppedFrame, orientedTopNote("normal", 1)), LED_STATIC);
+  assert.equal(frameMode(stoppedFrame, orientedTopNote("normal", 2)), LED_STATIC);
+  assert.equal(frameMode(stoppedFrame, sideNote(0)), LED_STATIC);
+  assert.equal(frameMode(stoppedFrame, sideNote(1)), LED_STATIC);
 });
 
 test("swap exchanges the two physical roles", () => {
