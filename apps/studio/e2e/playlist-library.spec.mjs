@@ -80,8 +80,8 @@ test("artwork, shared playlists and Rekordbox ordering work together", async ({ 
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
     <DJ_PLAYLISTS Version="1.0.0">
       <COLLECTION Entries="2">
-        <TRACK TrackID="1" Name="First Dub" Artist="Tester" Location="file://localhost/Music/01%20First.wav" />
-        <TRACK TrackID="2" Name="Second Dub" Artist="Tester" Location="file://localhost/Music/02%20Second.wav" />
+        <TRACK TrackID="1" Name="First Dub" Artist="Tester" AverageBpm="140" TotalTime="180" Location="file://localhost/Music/01%20First.wav" />
+        <TRACK TrackID="2" Name="Second Dub" Artist="Tester" AverageBpm="90" TotalTime="240" Location="file://localhost/Music/02%20Second.wav" />
       </COLLECTION>
       <PLAYLISTS><NODE Type="0" Name="ROOT"><NODE Type="1" Name="Dub Order" Entries="2">
         <TRACK Key="1"/><TRACK Key="2"/>
@@ -104,6 +104,12 @@ test("artwork, shared playlists and Rekordbox ordering work together", async ({ 
   await page.locator(".engine-browser-playlist").filter({ hasText: "Dub Order" }).click();
   await expect(page.locator(".engine-browser-title")).toContainText("Dub Order");
   await expect(page.locator(".engine-track-row")).toHaveCount(2);
+  await expect(page.locator(".engine-track-name").nth(0)).toContainText("First Dub");
+  await page.getByRole("button", { name: /Sort by BPM/ }).click();
+  await expect(page.locator(".engine-track-name").nth(0)).toContainText("Second Dub");
+  await page.getByRole("button", { name: /Sort by BPM/ }).click();
+  await expect(page.locator(".engine-track-name").nth(0)).toContainText("First Dub");
+  await page.getByRole("button", { name: /Sort by #/ }).click();
   await expect(page.locator(".engine-track-name").nth(0)).toContainText("First Dub");
   await testInfo.attach("playlist-master-detail", {
     body: await page.locator(".playlist-modal").screenshot(),

@@ -33,6 +33,7 @@
         artist: node.getAttribute("Artist") || "",
         album: node.getAttribute("Album") || "",
         bpm: Number(node.getAttribute("AverageBpm")) || null,
+        duration: Number(node.getAttribute("TotalTime")) || null,
         location,
         path,
         fileName: baseName(path),

@@ -12,6 +12,35 @@ const isAudioFile = (file) => !!file && (
   || /\.(mp3|wav|aiff?|flac|ogg|m4a|aac|opus)$/i.test(file.name || "")
 );
 
+const librarySortValue = (track, key) => {
+  if (key === "position") return track.index;
+  if (key === "title") return track.info.title || track.info.name || track.file?.name || "";
+  if (key === "bpm") return Number(track.info.bpm) || null;
+  if (key === "duration") return Number(track.info.duration) || null;
+  return track.index;
+};
+
+function sortLibraryTracks(tracks, sort) {
+  const direction = sort.direction === "desc" ? -1 : 1;
+  return [...tracks].sort((left, right) => {
+    const a = librarySortValue(left, sort.key);
+    const b = librarySortValue(right, sort.key);
+    const aMissing = a == null || a === "";
+    const bMissing = b == null || b === "";
+    // Unknown BPM/duration should never jump to the top when reversing the
+    // sort. DJs need the analysed tracks together in both directions.
+    if (aMissing !== bMissing) return aMissing ? 1 : -1;
+    let compared = 0;
+    if (typeof a === "string" || typeof b === "string") {
+      compared = String(a).localeCompare(String(b), undefined, { sensitivity: "base", numeric: true });
+      if (!compared && sort.key === "title") {
+        compared = String(left.info.artist || "").localeCompare(String(right.info.artist || ""), undefined, { sensitivity: "base", numeric: true });
+      }
+    } else compared = Number(a) - Number(b);
+    return compared ? compared * direction : left.index - right.index;
+  });
+}
+
 // === Saved-playlist storage (localStorage) ===
 // We persist only filenames + order. Audio data isn't saved (browser security).
 // On load, user re-picks the audio files from disk; we match by name.
@@ -95,6 +124,7 @@ function PlaylistModal({
   const [libraryCollapsed, setLibraryCollapsed] = useState(() => new Set());
   const [selectedLibraryId, setSelectedLibraryId] = useState(null);
   const [libraryTrackFilter, setLibraryTrackFilter] = useState("");
+  const [libraryTrackSort, setLibraryTrackSort] = useState({ key: "position", direction: "asc" });
   // Reconcile state for loading: when user picks a saved set, we need files from disk.
   // shape: { id, name, tracks: [...names], pickedFiles: Map<lower(name), File>, missing: [names] }
   const [reconcile, setReconcile] = useState(null);
@@ -235,6 +265,24 @@ function PlaylistModal({
   }, [libraryPlaylists, selectedLibraryId]);
 
   useEffect(() => { setLibraryTrackFilter(""); }, [selectedLibraryId]);
+
+  const changeLibraryTrackSort = (key) => {
+    setLibraryTrackSort((current) => current.key === key
+      ? { key, direction: current.direction === "asc" ? "desc" : "asc" }
+      : { key, direction: "asc" });
+  };
+
+  const librarySortLabel = (key, label) => {
+    const active = libraryTrackSort.key === key;
+    return (
+      <button type="button" className={`engine-track-sort ${active ? "active" : ""}`}
+        aria-label={`Sort by ${label}${active ? `, currently ${libraryTrackSort.direction === "asc" ? "ascending" : "descending"}` : ""}`}
+        onClick={() => changeLibraryTrackSort(key)}>
+        <span>{label}</span>
+        <i aria-hidden="true">{active ? (libraryTrackSort.direction === "asc" ? "▲" : "▼") : "◇"}</i>
+      </button>
+    );
+  };
 
   const onLoad = async (i, play = true) => {
     if (!engDeck) return;
@@ -1074,9 +1122,9 @@ function PlaylistModal({
                             : { name: String(track || ""), title: String(track || "") },
                         }));
                       const query = libraryTrackFilter.trim().toLowerCase();
-                      const visibleTracks = previewTracks.filter(({ file, info }) => !query || (
+                      const visibleTracks = sortLibraryTracks(previewTracks.filter(({ file, info }) => !query || (
                         `${info.title || file?.name || info.name || ""} ${info.artist || ""} ${info.album || ""} ${info.genre || ""}`.toLowerCase().includes(query)
-                      ));
+                      )), libraryTrackSort);
                       const loadedHere = liveFiles.length === engDeck?.playlist?.length
                         && liveFiles.length > 0
                         && liveFiles.every((file, index) => file === engDeck.playlist[index]);
@@ -1113,7 +1161,12 @@ function PlaylistModal({
 
                           <div className="engine-track-table">
                             <div className="engine-track-head">
-                              <span>#</span><span></span><span>TITLE / ARTIST</span><span>BPM</span><span>TIME</span><span></span>
+                              <span>{librarySortLabel("position", "#")}</span>
+                              <span></span>
+                              <span>{librarySortLabel("title", "TITLE / ARTIST")}</span>
+                              <span>{librarySortLabel("bpm", "BPM")}</span>
+                              <span>{librarySortLabel("duration", "TIME")}</span>
+                              <span></span>
                             </div>
                             <div className="engine-track-scroll">
                               {visibleTracks.length ? visibleTracks.map(({ file, index, info }) => {

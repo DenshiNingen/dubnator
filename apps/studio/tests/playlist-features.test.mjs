@@ -67,6 +67,17 @@ test("Engine DJ catalogue keeps metadata needed by the track preview", () => {
   }
 });
 
+test("playlist library tracks can be sorted without changing their load index", () => {
+  assert.match(playlist, /sortLibraryTracks\(previewTracks\.filter/);
+  assert.match(playlist, /librarySortLabel\("position", "#"\)/);
+  assert.match(playlist, /librarySortLabel\("title", "TITLE \/ ARTIST"\)/);
+  assert.match(playlist, /librarySortLabel\("bpm", "BPM"\)/);
+  assert.match(playlist, /librarySortLabel\("duration", "TIME"\)/);
+  assert.match(playlist, /loadEnginePlaylist\(playlist, \{ index, stayInLibrary: true \}\)/);
+  assert.match(rekordbox, /duration: Number\(node\.getAttribute\("TotalTime"\)\)/);
+  assert.match(css, /\.engine-track-sort\.active/);
+});
+
 test("advanced mode exposes a safe control to clear persisted deck files", () => {
   assert.match(app, /const clearSavedSession = \(\) =>/);
   assert.match(app, /store\.clearAll\(\)/);

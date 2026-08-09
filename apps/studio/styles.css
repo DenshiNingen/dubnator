@@ -5617,6 +5617,34 @@ input[type="range"]:disabled { opacity: 0.35; }
   font: 800 7px/1 var(--mono);
   letter-spacing: .15em;
 }
+.engine-track-sort {
+  display: inline-flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  justify-content: inherit;
+  gap: 3px;
+  padding: 0;
+  color: inherit;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+.engine-track-sort:hover,
+.engine-track-sort.active { color: #55c9ff; }
+.engine-track-sort i {
+  flex: 0 0 auto;
+  color: #2f83a8;
+  font: 700 6px/1 var(--mono);
+  font-style: normal;
+  letter-spacing: 0;
+}
+.engine-track-head > :nth-child(1) .engine-track-sort,
+.engine-track-head > :nth-child(4) .engine-track-sort,
+.engine-track-head > :nth-child(5) .engine-track-sort { justify-content: flex-end; }
 .engine-track-scroll {
   min-height: 0;
   flex: 1;
