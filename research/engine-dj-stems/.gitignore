@@ -1,0 +1,5 @@
+work/
+reports/generated/
+__pycache__/
+*.pyc
+.DS_Store
