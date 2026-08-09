@@ -3,11 +3,12 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const root = new URL("../", import.meta.url);
-const [app, playlist, metadata, rekordbox, css] = await Promise.all([
+const [app, playlist, metadata, rekordbox, engineDJ, css] = await Promise.all([
   readFile(new URL("app.jsx", root), "utf8"),
   readFile(new URL("playlist-modal.jsx", root), "utf8"),
   readFile(new URL("track-metadata.js", root), "utf8"),
   readFile(new URL("rekordbox.js", root), "utf8"),
+  readFile(new URL("engine-dj.js", root), "utf8"),
   readFile(new URL("styles.css", root), "utf8"),
 ]);
 
@@ -43,6 +44,27 @@ test("playlist rows expose a paused load action separately from load and play", 
   assert.match(playlist, /title="Load paused"/);
   assert.match(playlist, /onClick=\{\(\) => onLoad\(i, false\)\}/);
   assert.match(playlist, /title="Load & play"/);
+});
+
+test("Engine DJ library uses a hierarchical master-detail browser", () => {
+  assert.match(playlist, /className="engine-browser-tree"/);
+  assert.match(playlist, /className="engine-browser-detail"/);
+  assert.match(playlist, /setSelectedLibraryId\(id\)/);
+  assert.match(playlist, /Selected playlist tracks/);
+  assert.match(playlist, /loadEnginePlaylist\(playlist, \{ index, stayInLibrary: true \}\)/);
+  assert.match(playlist, /loadEnginePlaylist\(playlist, \{ index, play: true, stayInLibrary: true \}\)/);
+  assert.match(css, /\.engine-browser\s*\{[\s\S]*?grid-template-columns:/);
+  assert.match(css, /@media \(max-width: 760px\)[\s\S]*?\.engine-browser\s*\{[\s\S]*?grid-template-columns: minmax\(0, 1fr\)/);
+});
+
+test("Engine DJ catalogue keeps metadata needed by the track preview", () => {
+  assert.match(engineDJ, /split\(";"\)[\s\S]*?\.reverse\(\)/);
+  assert.match(playlist, /folderId != null\) setSelectedLibraryId\(folderId\)/);
+  assert.match(playlist, /active\?\.files\?\.length \? active : playlist/);
+  assert.match(playlist, /mergeLibraryCatalogue\(catalogue\.playlists, current\)/);
+  for (const field of ["album", "genre", "duration", "bpm"]) {
+    assert.match(engineDJ, new RegExp(`${field}: file\\.engineDJ\\.${field}`));
+  }
 });
 
 test("advanced mode exposes a safe control to clear persisted deck files", () => {

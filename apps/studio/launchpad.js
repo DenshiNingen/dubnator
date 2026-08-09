@@ -130,6 +130,8 @@
     const geqBand = id.match(/^geqA\.(\d+)$/);
     if (geqBand) return SLOT_TONES[Math.min(9, Number(geqBand[1]))];
     if (FX_CONTROL_TONES[id]) return FX_CONTROL_TONES[id];
+    const stem = id.match(/\.stem\.(vocals|melody|bass|drums)$/);
+    if (stem) return ({ vocals: "magenta", melody: "cyan", bass: "orange", drums: "yellow" })[stem[1]];
 
     // Controls whose function is more useful than their source identity.
     if (/\.mute$|\.stop$|\.panic$|\.clear$|route\.off$/.test(id)) return "red";
@@ -217,6 +219,8 @@
       "deckA.loop.in", "deckA.loop.out", "deckA.loop.clear",
       "deckA.loop.beat1", "deckA.loop.beat2", "deckA.loop.beat4",
       "deckA.loop.half", "deckA.loop.double",
+      ...Array(18).fill(null),
+      "deckA.stem.vocals", "deckA.stem.melody", "deckA.stem.bass", "deckA.stem.drums",
     ]),
     page("DECK B", "deckB", [
       "deckB.gain", "deckB.pan", "deckB.rewindlen",
@@ -226,6 +230,8 @@
       "deckB.loop.in", "deckB.loop.out", "deckB.loop.clear",
       "deckB.loop.beat1", "deckB.loop.beat2", "deckB.loop.beat4",
       "deckB.loop.half", "deckB.loop.double",
+      ...Array(18).fill(null),
+      "deckB.stem.vocals", "deckB.stem.melody", "deckB.stem.bass", "deckB.stem.drums",
     ]),
     page("INPUTS", "input", [
       "in1.gain", "in1.pan", "in2.gain", "in2.pan",
@@ -481,6 +487,7 @@
       this.cancelSchedule = options.cancelSchedule || ((timer) => globalThis.clearTimeout(timer));
       this.roleHoldMs = Number(options.roleHoldMs) || SINGLE_ROLE_HOLD_MS;
       this.values = {};
+      this.availability = {};
       this.meters = {};
       this.meterPeaks = new Map();
       this.devices = [];
@@ -712,11 +719,11 @@
         tone: layout.page.tone,
         ranges: [...layout.ranges],
         meterRanges: layout.ranges.filter((id) => METER_CONTROLS.has(id)),
-        gridButtons: [...layout.gridButtons].map(([position, id]) => {
+        gridButtons: [...layout.gridButtons].filter(([, id]) => this.availability[id] !== false).map(([position, id]) => {
           const [row, column] = position.split(":").map(Number);
           return { row, column, id };
         }),
-        sideButtons: [...layout.sideButtons],
+        sideButtons: layout.sideButtons.map((id) => this.availability[id] === false ? undefined : id),
       };
     }
 
@@ -728,8 +735,9 @@
       return controlTone(id, fallback);
     }
 
-    sync(values) {
+    sync(values, availability) {
       this.values = values || {};
+      if (availability) this.availability = availability;
       for (const device of this.devices) this.render(device);
     }
 
@@ -941,6 +949,9 @@
         target = layout.sideButtons[control.row];
       }
       if (!target) return true;
+      // Contextual controls (currently Engine stems) are physically absent
+      // when unavailable: their LED remains off and pad presses are consumed.
+      if (this.availability[target] === false) return true;
 
       const meta = this.meta.get(target) || { type: "button", momentary: false };
       if (meta.momentary === true) {
@@ -989,6 +1000,7 @@
     }
 
     _buttonColour(id, colours) {
+      if (this.availability[id] === false) return 0;
       const value = Number(this.values[id]) || 0;
       return value > 0.5 ? colours.bright : colours.dim;
     }

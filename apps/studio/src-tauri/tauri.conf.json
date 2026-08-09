@@ -29,7 +29,8 @@
         "font-src": "'self' data:",
         "img-src": "'self' asset: http://asset.localhost data: blob:",
         "media-src": "'self' blob:",
-        "script-src": "'self'",
+        "script-src": "'self' 'wasm-unsafe-eval'",
+        "worker-src": "'self' blob:",
         "style-src": "'self' 'unsafe-inline'"
       }
     }
@@ -38,6 +39,10 @@
     "active": true,
     "targets": "all",
     "category": "Music",
+    "macOS": {
+      "signingIdentity": "-",
+      "entitlements": "Entitlements.plist"
+    },
     "shortDescription": "Brutalist dub FX rack",
     "longDescription": "Dubnator Mk-1 — an interactive dub/reggae preamp & FX rack with dual decks, kill EQ, parametric EQ, convolution reverb, tape echo, dub siren, sample pads, and master limiter.",
     "icon": [

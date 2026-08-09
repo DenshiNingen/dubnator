@@ -4,6 +4,7 @@ const eng = window.DubnatorEngine;
 const { useFloatingBox } = window.DubnatorFloating;
 const trackMetadata = window.DubnatorTrackMetadata;
 const rekordbox = window.DubnatorRekordbox;
+const engineDJ = window.DubnatorEngineDJ;
 
 const trackKey = (file) => `${file?.name || ""}|${file?.size || 0}|${file?.lastModified || 0}`;
 const isAudioFile = (file) => !!file && (
@@ -39,6 +40,25 @@ function fmtSavedDate(ts) {
          d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function mergeLibraryCatalogue(persisted, current) {
+  const saved = Array.isArray(persisted) ? persisted : [];
+  const live = Array.isArray(current) ? current : [];
+  const keyFor = (playlist) => playlist?.id || playlist?.path || playlist?.name;
+  const liveByKey = new Map(live.map((playlist) => [keyFor(playlist), playlist]));
+  const merged = saved.map((playlist) => {
+    const active = liveByKey.get(keyFor(playlist));
+    // File objects cannot be persisted, but remain valid for the lifetime of
+    // the page. Never replace a connected Engine playlist with its metadata-
+    // only IndexedDB snapshot when the manager is reopened.
+    return active?.files?.length ? active : playlist;
+  });
+  const savedKeys = new Set(saved.map(keyFor));
+  live.forEach((playlist) => {
+    if (!savedKeys.has(keyFor(playlist))) merged.push(playlist);
+  });
+  return merged;
+}
+
 // === PLAYLIST MODAL ===
 // Big centered modal showing both decks' playlists. Switch deck via tabs.
 // Shows track #, name, duration (lazily decoded). Load and Load & Play are separate actions.
@@ -64,19 +84,23 @@ function PlaylistModal({
   const dropRef = useRef(null);
   const [dragOver, setDragOver] = useState(false);
   const [plFilter, setPlFilter] = useState(""); // playlist name filter
-  const fb = useFloatingBox({ w: 740, h: 520 }, 420, 320); // floating window box
+  const fb = useFloatingBox({ w: 980, h: 620 }, 640, 400); // floating window box
 
   // Save/load UI state
-  const [view, setView] = useState("list"); // "list" | "saved" | "rekordbox"
+  const [view, setView] = useState("list"); // "list" | "saved" | "library" | "rekordbox"
   const [saveNameOpen, setSaveNameOpen] = useState(false);
   const [saveName, setSaveName] = useState("");
   const [savedPlaylists, setSavedPlaylists] = useState(() => loadSavedPlaylists());
   const [libraryPlaylists, setLibraryPlaylists] = useState([]);
   const [libraryCollapsed, setLibraryCollapsed] = useState(() => new Set());
+  const [selectedLibraryId, setSelectedLibraryId] = useState(null);
+  const [libraryTrackFilter, setLibraryTrackFilter] = useState("");
   // Reconcile state for loading: when user picks a saved set, we need files from disk.
   // shape: { id, name, tracks: [...names], pickedFiles: Map<lower(name), File>, missing: [names] }
   const [reconcile, setReconcile] = useState(null);
   const [rekordboxImport, setRekordboxImport] = useState(null);
+  const [engineScan, setEngineScan] = useState(null);
+  const engineBusy = engineScan?.state === "scanning" || engineScan?.state === "loading";
   const [toast, setToast] = useState(null); // {msg, kind}
   const toastTimer = useRef(null);
   const showToast = (msg, kind = "info") => {
@@ -88,7 +112,9 @@ function PlaylistModal({
   useEffect(() => {
     if (!open || !window.DubnatorLibraryStore?.load) return;
     window.DubnatorLibraryStore.load().then((catalogue) => {
-      if (catalogue?.playlists) setLibraryPlaylists(catalogue.playlists);
+      if (catalogue?.playlists) {
+        setLibraryPlaylists((current) => mergeLibraryCatalogue(catalogue.playlists, current));
+      }
     }).catch(() => {});
   }, [open]);
   const persistLibrary = (playlists) => {
@@ -111,7 +137,9 @@ function PlaylistModal({
     let cursor = 0;
     const probe = async (file, i) => {
       const key = `${deckKey}|${i}|${file.name}|${file.size}`;
-      if (durations[key] == null) await new Promise((resolve) => {
+      if (file.engineDJ?.duration && durations[key] == null) {
+        setDurations((current) => ({ ...current, [key]: file.engineDJ.duration }));
+      } else if (durations[key] == null) await new Promise((resolve) => {
         const url = URL.createObjectURL(file);
         const el = document.createElement("audio");
         el.preload = "metadata";
@@ -181,12 +209,32 @@ function PlaylistModal({
         const hasChildren = child.children.size > 0;
         rows.push({ kind: hasChildren ? "folder" : "playlist", node: child, depth });
         if (!libraryCollapsed.has(child.path)) walk(child, depth + 1);
-        if (child.playlist && hasChildren) rows.push({ kind: "playlist", node: child, depth: depth + 1 });
+        // Engine folders may also be aggregate playlists containing the union
+        // of their children. The folder row itself selects that aggregate, so
+        // never duplicate it as a second playlist row below the children.
       });
     };
     walk(root, 0);
     return rows;
   }, [libraryPlaylists, libraryCollapsed]);
+
+  const selectedLibraryPlaylist = useMemo(() => libraryPlaylists.find((playlist) => (
+    (playlist.id || playlist.path) === selectedLibraryId
+  )) || null, [libraryPlaylists, selectedLibraryId]);
+
+  useEffect(() => {
+    if (!libraryPlaylists.length) {
+      if (selectedLibraryId != null) setSelectedLibraryId(null);
+      return;
+    }
+    if (libraryPlaylists.some((playlist) => (playlist.id || playlist.path) === selectedLibraryId)) return;
+    const preferred = libraryPlaylists.find((playlist) => playlist.source === "engine-dj" && playlist.files?.length)
+      || libraryPlaylists.find((playlist) => playlist.source === "engine-dj")
+      || libraryPlaylists[0];
+    setSelectedLibraryId(preferred.id || preferred.path);
+  }, [libraryPlaylists, selectedLibraryId]);
+
+  useEffect(() => { setLibraryTrackFilter(""); }, [selectedLibraryId]);
 
   const onLoad = async (i, play = true) => {
     if (!engDeck) return;
@@ -576,6 +624,88 @@ function PlaylistModal({
     event.target.value = "";
   };
 
+  const importEngineDrive = async (filesInput) => {
+    if (!engineDJ?.scanFiles) return;
+    setEngineScan({ state: "scanning", message: "Opening Engine DJ drive", detail: "Preparing file index", progress: 0.02 });
+    try {
+      const result = await engineDJ.scanFiles(filesInput, {
+        onProgress: ({ message, detail, progress }) => setEngineScan({
+          state: "scanning",
+          message,
+          detail,
+          progress: Math.max(0, Math.min(1, Number(progress) || 0)),
+        }),
+      });
+      const merged = [
+        ...libraryPlaylists.filter((playlist) => playlist.source !== "engine-dj"),
+        ...result.playlists,
+      ];
+      setLibraryPlaylists(merged);
+      // File objects stay live only for this selected drive. Persist the tree
+      // and metadata, never multi-megabyte audio/stem contents.
+      window.DubnatorLibraryStore?.save({
+        playlists: merged.map(({ files, ...playlist }) => playlist),
+      });
+      setEngineScan({
+        state: "ready",
+        message: `${result.trackCount} tracks · ${result.playlists.length} playlists · ${result.stemCount} stems`,
+        detail: "Engine DJ library connected",
+        progress: 1,
+      });
+      const firstEnginePlaylist = result.playlists.find((playlist) => playlist.files?.length)
+        || result.playlists[0];
+      setSelectedLibraryId(firstEnginePlaylist ? (firstEnginePlaylist.id || firstEnginePlaylist.path) : null);
+      setView("library");
+      showToast(`Engine DJ ready · ${result.playlists.length} playlists · ${result.stemCount} stems`, "ok");
+    } catch (error) {
+      console.error("Engine DJ scan failed", error);
+      setEngineScan({ state: "error", message: error?.message || "Could not read Engine DJ drive", detail: "Select the drive root or Engine Library folder", progress: 0 });
+      showToast(error?.message || "Could not read Engine DJ drive", "warn");
+    }
+  };
+  const onEngineDriveInput = (event) => {
+    importEngineDrive(event.target.files);
+    event.target.value = "";
+  };
+
+  const loadEnginePlaylist = async (playlist, options = {}) => {
+    if (!playlist?.files?.length || !engDeck) {
+      showToast("Reconnect the Engine DJ drive to load this playlist", "warn");
+      return;
+    }
+    if (canReplaceDeckTrack && !canReplaceDeckTrack(deckKey)) return;
+    const targetIndex = Math.max(0, Math.min(playlist.files.length - 1, Number(options.index) || 0));
+    const shouldPlay = !!options.play;
+    setEngineScan({ state: "loading", message: `Loading ${playlist.name}`, detail: `Preparing ${playlist.files.length} tracks`, progress: 0.18 });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      engDeck.stop?.();
+      engDeck.clearPlaylist();
+      playlist.files.forEach((file) => engDeck.addToPlaylist(file));
+      const targetFile = playlist.files[targetIndex];
+      setEngineScan({ state: "loading", message: `Loading ${playlist.name}`, detail: targetFile?.engineDJ?.hasStems ? "Decoding selected track and stems" : "Decoding selected track", progress: 0.58 });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await engDeck.loadPlaylistIndex(targetIndex);
+      if (shouldPlay) engDeck.play();
+      setState((current) => ({
+        ...current,
+        playlist: engDeck.playlist.map((file) => file.name),
+        playlistIdx: targetIndex,
+        name: engDeck.name,
+        playing: shouldPlay && engDeck.playing,
+        stems: engDeck.getStemState?.(),
+      }));
+      onPlaylistChange?.(deckKey);
+      setEngineScan({ state: "ready", message: `${playlist.files.length} tracks loaded`, detail: `${playlist.name} · Deck ${deckKey} ${shouldPlay ? "playing" : "paused"}`, progress: 1 });
+      if (!options.stayInLibrary) setView("list");
+      showToast(`${targetFile?.engineDJ?.title || targetFile?.name || "Track"} · Deck ${deckKey} ${shouldPlay ? "playing" : "paused"}`, "ok");
+    } catch (error) {
+      console.error("Engine DJ playlist load failed", error);
+      setEngineScan({ state: "error", message: error?.message || "Could not load Engine DJ playlist", detail: playlist.name, progress: 0 });
+      showToast(error?.message || "Could not load Engine DJ playlist", "warn");
+    }
+  };
+
   const selectedRekordbox = rekordboxImport?.playlists?.find((playlist) => (
     playlist.path === rekordboxImport.selectedPath
   )) || null;
@@ -668,6 +798,19 @@ function PlaylistModal({
   const files = (engDeck && engDeck.playlist) || [];
   const curIdx = engDeck ? engDeck.playlistIdx : 0;
   const otherCount = (isA ? eng.deckB : eng.deckA)?.playlist?.length || 0;
+  const engineStatus = engineScan && (
+    <div className={`engine-scan-status ${engineScan.state}`} role="status" aria-live="polite">
+      <div className="engine-scan-copy">
+        <strong>{engineScan.message}</strong>
+        {engineScan.detail && <small>{engineScan.detail}</small>}
+      </div>
+      {engineBusy && (
+        <div className="engine-scan-progress" aria-label={`Engine DJ scan ${Math.round((engineScan.progress || 0) * 100)}%`}>
+          <span style={{ width: `${Math.max(2, (engineScan.progress || 0) * 100)}%` }}></span>
+        </div>
+      )}
+    </div>
+  );
 
   return ReactDOM.createPortal(
       <div className="floating-window panel with-screws playlist-modal" role="dialog"
@@ -755,11 +898,11 @@ function PlaylistModal({
                   </div>
                 )}
                 {files.map((file, i) => ({ file, i }))
-                  .filter(({ file }) => !plFilter || file.name.toLowerCase().includes(plFilter.toLowerCase()))
+                  .filter(({ file }) => !plFilter || `${file.name} ${file.engineDJ?.title || ""} ${file.engineDJ?.artist || ""}`.toLowerCase().includes(plFilter.toLowerCase()))
                   .map(({ file, i }) => {
                   const key = `${deckKey}|${i}|${file.name}|${file.size}`;
                   const dur = durations[key];
-                  const info = metadata[trackKey(file)] || {};
+                  const info = { ...(metadata[trackKey(file)] || {}), ...(file.engineDJ || {}) };
                   const isCur = i === curIdx;
                   return (
                     <div key={trackKey(file) + i}
@@ -781,6 +924,7 @@ function PlaylistModal({
                         {(info.artist || info.album) && (
                           <small>{[info.artist, info.album].filter(Boolean).join(" · ")}</small>
                         )}
+                        {info.hasStems && <small className="pl-stems-badge">4 STEMS</small>}
                       </span>
                       <span className="c-dur">{fmtDur(dur)}</span>
                       <span className="c-act">
@@ -837,9 +981,14 @@ function PlaylistModal({
                   REKORDBOX XML
                   <input type="file" className="hidden" accept=".xml,text/xml,application/xml" multiple onChange={onRekordboxInput} />
                 </label>
+                <label className={`pl-action engine-action ${engineBusy ? "scanning" : ""}`} title="Read playlists, artwork and stems from an Engine DJ drive">
+                  {engineBusy ? `${Math.round((engineScan.progress || 0) * 100)}% · ENGINE DJ` : "ENGINE DJ DRIVE"}
+                  <input type="file" className="hidden" multiple webkitdirectory="" directory="" onChange={onEngineDriveInput} />
+                </label>
                 <button className="pl-action danger" onClick={onClear} disabled={files.length === 0}>CLEAR</button>
                 <span className="pl-footer-hint">Drop audio files · 2× click row to load · ESC closes</span>
               </div>
+              {engineStatus}
             </React.Fragment>
           ) : view === "library" ? (
             <div className="pl-saved">
@@ -850,34 +999,167 @@ function PlaylistModal({
                   IMPORT XMLS
                   <input type="file" className="hidden" accept=".xml,text/xml,application/xml" multiple onChange={onRekordboxInput} />
                 </label>
+                <label className={`pl-action engine-action ${engineBusy ? "scanning" : ""}`}>
+                  {engineBusy ? `${Math.round((engineScan.progress || 0) * 100)}% · ENGINE DJ` : "ENGINE DJ DRIVE"}
+                  <input type="file" className="hidden" multiple webkitdirectory="" directory="" onChange={onEngineDriveInput} />
+                </label>
               </div>
+              {engineStatus}
               {libraryPlaylists.length === 0 ? (
-                <div className="pl-empty"><div className="pl-empty-icon">⌘</div><div className="pl-empty-title">No playlists imported</div><div className="pl-empty-sub">Import one or more Rekordbox XML exports to build your library.</div></div>
+                <div className="pl-empty"><div className="pl-empty-icon">⌘</div><div className="pl-empty-title">No playlists imported</div><div className="pl-empty-sub">Connect an Engine DJ drive or import Rekordbox XML exports to build your library.</div></div>
               ) : (
-                <div className="pl-saved-list pl-library-tree">
-                  {libraryRows.map(({ kind, node, depth }) => kind === "folder" ? (
-                    <button key={`folder:${node.path}`} className="pl-library-folder" style={{ paddingLeft: `${10 + depth * 18}px` }}
-                      onClick={() => setLibraryCollapsed((current) => {
-                        const next = new Set(current);
-                        if (next.has(node.path)) next.delete(node.path); else next.add(node.path);
-                        return next;
-                      })}>
-                      <span className="pl-library-caret">{libraryCollapsed.has(node.path) ? "▸" : "▾"}</span>
-                      <strong>{node.name}</strong>
-                      <small>{node.children.size} {node.children.size === 1 ? "playlist" : "playlists"}</small>
-                    </button>
-                  ) : (
-                    <div key={`playlist:${node.playlist?.id || node.path}`} className="pl-saved-row pl-library-playlist" style={{ marginLeft: `${depth * 18}px` }}>
-                      <div className="pl-saved-info">
-                        <strong className="pl-saved-name">♫ {node.playlist?.name || node.name}</strong>
-                        <div className="pl-saved-meta"><span className="pl-saved-deck a">{node.playlist?.source === "rekordbox" ? "REKORDBOX" : "LOCAL"}</span><span>{node.playlist?.tracks?.length || 0} tracks</span></div>
-                      </div>
-                      <div className="pl-saved-actions"><button className="pl-action primary" onClick={() => beginReconcile(node.playlist)}>LOAD →</button></div>
+                <div className="engine-browser">
+                  <aside className="engine-browser-tree" aria-label="Playlist library">
+                    <div className="engine-browser-pane-head">
+                      <span>PLAYLISTS</span>
+                      <small>{libraryPlaylists.length}</small>
                     </div>
-                  ))}
+                    <div className="engine-browser-tree-scroll">
+                      {libraryRows.map(({ kind, node, depth }) => kind === "folder" ? (() => {
+                        const folderPlaylist = node.playlist;
+                        const folderId = folderPlaylist?.id || folderPlaylist?.path || null;
+                        const folderActive = folderId != null && folderId === selectedLibraryId;
+                        return (
+                          <button key={`folder:${node.path}`} className={`engine-browser-folder ${folderActive ? "active" : ""}`}
+                            aria-pressed={folderId != null ? folderActive : undefined}
+                            style={{ paddingLeft: `${9 + depth * 14}px` }}
+                            onClick={() => {
+                              if (folderId != null) setSelectedLibraryId(folderId);
+                              setLibraryCollapsed((current) => {
+                                const next = new Set(current);
+                                if (next.has(node.path)) next.delete(node.path); else next.add(node.path);
+                                return next;
+                              });
+                            }}>
+                            <span className="pl-library-caret">{libraryCollapsed.has(node.path) ? "▸" : "▾"}</span>
+                            <span className="engine-browser-icon">▰</span>
+                            <strong>{node.name}</strong>
+                            <small>{node.children.size}</small>
+                          </button>
+                        );
+                      })() : (() => {
+                        const playlist = node.playlist;
+                        const id = playlist?.id || playlist?.path || node.path;
+                        const active = id === selectedLibraryId;
+                        return (
+                          <button key={`playlist:${id}`} className={`engine-browser-playlist ${active ? "active" : ""}`}
+                            style={{ paddingLeft: `${22 + depth * 14}px` }}
+                            onClick={() => setSelectedLibraryId(id)}>
+                            <span className={`engine-browser-source ${playlist?.source === "engine-dj" ? "engine" : "rekordbox"}`}>●</span>
+                            <span className="engine-browser-playlist-copy">
+                              <strong>{playlist?.name || node.name}</strong>
+                              <small>{playlist?.tracks?.length || 0} tracks</small>
+                            </span>
+                            {playlist?.source === "engine-dj" && playlist?.tracks?.some((track) => track.hasStems) && (
+                              <span className="engine-browser-stem-mark">S</span>
+                            )}
+                          </button>
+                        );
+                      })())}
+                    </div>
+                  </aside>
+
+                  <section className="engine-browser-detail" aria-label="Selected playlist tracks">
+                    {selectedLibraryPlaylist ? (() => {
+                      const playlist = selectedLibraryPlaylist;
+                      const liveFiles = playlist.files || [];
+                      const catalogueTracks = playlist.trackRefs?.length ? playlist.trackRefs : (playlist.tracks || []);
+                      const previewTracks = liveFiles.length
+                        ? liveFiles.map((file, index) => ({ file, index, info: { ...(file.engineDJ || {}) } }))
+                        : catalogueTracks.map((track, index) => ({
+                          file: null,
+                          index,
+                          info: track && typeof track === "object"
+                            ? track
+                            : { name: String(track || ""), title: String(track || "") },
+                        }));
+                      const query = libraryTrackFilter.trim().toLowerCase();
+                      const visibleTracks = previewTracks.filter(({ file, info }) => !query || (
+                        `${info.title || file?.name || info.name || ""} ${info.artist || ""} ${info.album || ""} ${info.genre || ""}`.toLowerCase().includes(query)
+                      ));
+                      const loadedHere = liveFiles.length === engDeck?.playlist?.length
+                        && liveFiles.length > 0
+                        && liveFiles.every((file, index) => file === engDeck.playlist[index]);
+                      const stemCount = previewTracks.filter(({ info }) => info.hasStems).length;
+                      return (
+                        <React.Fragment>
+                          <div className="engine-browser-detail-head">
+                            <div className="engine-browser-title">
+                              <span className={`pl-saved-deck ${playlist.source === "engine-dj" ? "engine" : "a"}`}>
+                                {playlist.source === "engine-dj" ? "ENGINE DJ" : playlist.source === "rekordbox" ? "REKORDBOX" : "LOCAL"}
+                              </span>
+                              <strong>{playlist.name}</strong>
+                              <small>{playlist.path || playlist.name}</small>
+                            </div>
+                            <div className="engine-browser-summary">
+                              <span>{previewTracks.length} TRACKS</span>
+                              {stemCount > 0 && <span className="stems">{stemCount} STEMS</span>}
+                              {loadedHere && <span className="loaded">LOADED · DECK {deckKey}</span>}
+                            </div>
+                          </div>
+
+                          <div className="engine-browser-toolbar">
+                            <input className="pl-filter mono" type="search" placeholder="Filter this playlist…"
+                              value={libraryTrackFilter} onChange={(event) => setLibraryTrackFilter(event.target.value)} />
+                            {playlist.source === "engine-dj" ? (
+                              <button className="pl-action primary" disabled={!liveFiles.length || engineBusy}
+                                onClick={() => loadEnginePlaylist(playlist, { stayInLibrary: true })}>
+                                LOAD PLAYLIST
+                              </button>
+                            ) : (
+                              <button className="pl-action primary" onClick={() => beginReconcile(playlist)}>MATCH AUDIO</button>
+                            )}
+                          </div>
+
+                          <div className="engine-track-table">
+                            <div className="engine-track-head">
+                              <span>#</span><span></span><span>TITLE / ARTIST</span><span>BPM</span><span>TIME</span><span></span>
+                            </div>
+                            <div className="engine-track-scroll">
+                              {visibleTracks.length ? visibleTracks.map(({ file, index, info }) => {
+                                const title = info.title || file?.name || info.name || `Track ${index + 1}`;
+                                const isCurrent = loadedHere && index === engDeck.playlistIdx;
+                                return (
+                                  <div key={`${trackKey(file) || title}:${index}`} className={`engine-track-row ${isCurrent ? "current" : ""}`}
+                                    onDoubleClick={() => liveFiles.length && loadEnginePlaylist(playlist, { index, stayInLibrary: true })}>
+                                    <span className="engine-track-number">{String(index + 1).padStart(2, "0")}</span>
+                                    <span className={`c-art ${info.artworkUrl ? "has-artwork" : ""}`}>
+                                      {info.artworkUrl ? <img src={info.artworkUrl} alt="" draggable="false" /> : <span aria-hidden="true">♪</span>}
+                                    </span>
+                                    <span className="engine-track-name" title={title}>
+                                      <b>{title}</b>
+                                      <small>{[info.artist, info.album].filter(Boolean).join(" · ") || file?.name || "Unknown artist"}</small>
+                                      {info.hasStems && <i>4 STEMS</i>}
+                                    </span>
+                                    <span className="engine-track-bpm">{info.bpm ? Math.round(info.bpm) : "—"}</span>
+                                    <span className="engine-track-time">{fmtDur(info.duration)}</span>
+                                    <span className="engine-track-actions">
+                                      <button className="pl-mini pl-load" disabled={!liveFiles.length || engineBusy}
+                                        title={`Load ${title} paused`} onClick={() => loadEnginePlaylist(playlist, { index, stayInLibrary: true })}>LOAD</button>
+                                      <button className="pl-mini" disabled={!liveFiles.length || engineBusy}
+                                        title={`Load and play ${title}`} onClick={() => loadEnginePlaylist(playlist, { index, play: true, stayInLibrary: true })}>▶</button>
+                                    </span>
+                                  </div>
+                                );
+                              }) : (
+                                <div className="pl-empty engine-track-empty">
+                                  <div className="pl-empty-title">No matching tracks</div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          {playlist.source === "engine-dj" && !liveFiles.length && (
+                            <div className="engine-browser-offline">Reconnect the Engine DJ drive to load audio. Playlist structure remains available offline.</div>
+                          )}
+                        </React.Fragment>
+                      );
+                    })() : (
+                      <div className="pl-empty"><div className="pl-empty-icon">♫</div><div className="pl-empty-title">Choose a playlist</div><div className="pl-empty-sub">Its tracks will appear here.</div></div>
+                    )}
+                  </section>
                 </div>
               )}
-              <div className="pl-footer"><button className="pl-action" onClick={closeLoadView}>← BACK TO {label}</button><span className="pl-footer-hint">XML playlists are kept locally · audio files are matched when loaded</span></div>
+              <div className="pl-footer"><button className="pl-action" onClick={closeLoadView}>← BACK TO {label}</button><span className="pl-footer-hint">Engine audio stays on the drive · stems decode only when a track is loaded</span></div>
             </div>
           ) : view === "saved" ? (
             // === SAVED PLAYLISTS VIEW ===

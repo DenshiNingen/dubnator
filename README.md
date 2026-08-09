@@ -84,6 +84,25 @@ playlist JSON/ZIP export and file-picker flows remain available. Waveform envelo
 generation runs in a versioned worker and falls back to the main thread when
 workers are unavailable, so the offline PWA remains functional.
 
+### Engine DJ drives and stems
+
+Open a deck playlist and choose **ENGINE DJ DRIVE**, then select either the drive
+root or its `Engine Library` folder. Dubnator reads `Database2/m.db` locally,
+preserves Engine's playlist folders and track order, and links exported artwork,
+audio and `.stems` files without uploading them. Audio and stems remain lazy: only
+the selected playlist is attached to a deck and only the loaded track's stems are
+decoded.
+
+Tracks prepared with Engine DJ Stems expose four synchronized stereo controls in
+the official order **Vocals · Melody · Bass · Drums**. They appear in the expanded
+deck view and on the bottom row of each Launchpad's Deck A / Deck B page. The LEDs
+mirror mute state. Keyboard shortcuts are **Alt+1…4** for Deck A and **Alt+5…8**
+for Deck B. The browser needs directory-upload support; the desktop build uses the
+same private, on-device import flow. Chrome uses its native multichannel decoder;
+WebKit/Tauri and other engines that reject Engine's 8-channel AAC automatically
+fall back to a locally bundled WebAssembly decoder. No track data leaves the
+device in either path.
+
 ## The rack
 
 A five-band isolator (SUB·LOW·MID·HIGH·TOP) with kills, punch-in & solo · dual decks
@@ -120,7 +139,7 @@ Programmer Mode automatically, and restores Live Mode when the app closes.
 - Open **Help → Launchpad Mini MK3 layouts** for the interactive 8×8 maps and
   full labels for every page.
 
-The surface covers all 200 catalogued performance controls and keeps faders,
+The surface covers all 210 catalogued performance controls and keeps faders,
 toggles, selectors, transport, sample/siren pads and active pages synchronized
 with the UI.
 

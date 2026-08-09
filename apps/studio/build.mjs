@@ -42,6 +42,7 @@ const JSX_ENTRIES = [
 const STATIC_FILES = [
   "track-metadata.js",
   "rekordbox.js",
+  "engine-dj.js",
   "audio-codecs.js",
   "audio-engine.js",
   "bootstrap.js",
@@ -59,14 +60,28 @@ const VENDOR_MAP = {
   "node_modules/react/umd/react.production.min.js": "react.min.js",
   "node_modules/react-dom/umd/react-dom.production.min.js": "react-dom.min.js",
   "node_modules/jszip/dist/jszip.min.js": "jszip.min.js",
+  "node_modules/aes-js/index.js": "aes-js.js",
+  "node_modules/sql.js/dist/sql-wasm.js": "sql-wasm.js",
+  "node_modules/sql.js/dist/sql-wasm.wasm": "sql-wasm.wasm",
+  // The tiny FFmpeg controller is available at boot. Its worker/core stay out
+  // of the offline shell and are fetched only when native Web Audio rejects an
+  // Engine DJ 8-channel AAC stream (notably WebKit/Tauri on macOS).
+  "node_modules/@ffmpeg/ffmpeg/dist/umd/ffmpeg.js": "ffmpeg/ffmpeg.js",
+};
+const LAZY_VENDOR_MAP = {
+  "node_modules/sql.js/dist/sql-asm.js": "sql-asm.js",
+  "node_modules/@ffmpeg/ffmpeg/dist/umd/814.ffmpeg.js": "ffmpeg/814.ffmpeg.js",
+  "node_modules/@ffmpeg/core/dist/umd/ffmpeg-core.js": "ffmpeg/ffmpeg-core.js",
+  "node_modules/@ffmpeg/core/dist/umd/ffmpeg-core.wasm": "ffmpeg/ffmpeg-core.wasm",
 };
 
 async function rewriteHtml() {
   const src = await readFile(join(ROOT, "Dubnator.html"), "utf8");
-  const [cssV, metadataV, rekordboxV, codecsV, audioV, bootstrapV, launchpadV, midiV, midiControlsV, tapTempoV, waveformWorkerV, playlistStoreV, libraryStoreV, registerSwV] = await Promise.all([
+  const [cssV, metadataV, rekordboxV, engineDjV, codecsV, audioV, bootstrapV, launchpadV, midiV, midiControlsV, tapTempoV, waveformWorkerV, playlistStoreV, libraryStoreV, registerSwV] = await Promise.all([
     assetHash("styles.css"),
     assetHash("track-metadata.js"),
     assetHash("rekordbox.js"),
+    assetHash("engine-dj.js"),
     assetHash("audio-codecs.js"),
     assetHash("audio-engine.js"),
     assetHash("bootstrap.js"),
@@ -89,6 +104,7 @@ async function rewriteHtml() {
     .replaceAll("styles.css?v=0", `styles.css?v=${cssV}`)
     .replaceAll("track-metadata.js?v=0", `track-metadata.js?v=${metadataV}`)
     .replaceAll("rekordbox.js?v=0", `rekordbox.js?v=${rekordboxV}`)
+    .replaceAll("engine-dj.js?v=0", `engine-dj.js?v=${engineDjV}`)
     .replaceAll("audio-codecs.js?v=0", `audio-codecs.js?v=${codecsV}`)
     .replaceAll("audio-engine.js?v=0", `audio-engine.js?v=${audioV}`)
     .replaceAll("bootstrap.js?v=0", `bootstrap.js?v=${bootstrapV}`)
@@ -121,6 +137,7 @@ async function rewriteHtml() {
     `styles.css?v=${cssV}`,
     `track-metadata.js?v=${metadataV}`,
     `rekordbox.js?v=${rekordboxV}`,
+    `engine-dj.js?v=${engineDjV}`,
     `audio-codecs.js?v=${codecsV}`,
     `audio-engine.js?v=${audioV}`,
     `bootstrap.js?v=${bootstrapV}`,
@@ -156,6 +173,11 @@ async function copyStatic() {
     await copyFile(join(ROOT, f), join(DIST, f));
   }
   for (const [src, name] of Object.entries(VENDOR_MAP)) {
+    await mkdir(dirname(join(VENDOR, name)), { recursive: true });
+    await copyFile(join(ROOT, src), join(VENDOR, name));
+  }
+  for (const [src, name] of Object.entries(LAZY_VENDOR_MAP)) {
+    await mkdir(dirname(join(VENDOR, name)), { recursive: true });
     await copyFile(join(ROOT, src), join(VENDOR, name));
   }
   for (const f of PWA_FILES) {

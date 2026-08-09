@@ -139,7 +139,7 @@ function KeyboardMap() {
         </div>
       </div>
       <div className="kb-foot mono">
-        English keyboard shortcuts · inspired by the Dub FX Live reference
+        English keyboard shortcuts · Engine stems: Alt+1–4 Deck A · Alt+5–8 Deck B · Vocals / Melody / Bass / Drums
       </div>
     </div>
   );

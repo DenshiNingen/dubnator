@@ -92,6 +92,23 @@ export class MockAudioContext {
 
 function DOMException_(msg) { const e = new Error(msg); e.name = "EncodingError"; return e; }
 
+class MockHTMLMediaElement {
+  setSinkId(id) {
+    if (!MockHTMLMediaElement.userActivated) return Promise.reject(new Error("A user gesture is required"));
+    this.sinkId = id;
+    return Promise.resolve();
+  }
+}
+MockHTMLMediaElement.userActivated = false;
+class MockAudioElement extends MockHTMLMediaElement {
+  constructor() { super(); this.srcObject = null; this.parentNode = null; this.sinkId = ""; this.style = {}; }
+  play() {
+    if (!MockHTMLMediaElement.userActivated) return Promise.reject(new Error("A user gesture is required"));
+    return Promise.resolve();
+  }
+  pause() {}
+}
+
 // Install a browser-ish global environment, load audio-engine.js into it, and
 // return the resulting window.DubnatorEngine constructor instance.
 import { readFile } from "node:fs/promises";
@@ -112,6 +129,8 @@ export async function loadEngine() {
     webkitAudioContext: MockAudioContext,
     DOMException: function () {},
     MediaRecorder: class { constructor() { this.state = "inactive"; } start() { this.state = "recording"; } stop() { this.state = "inactive"; if (this.onstop) this.onstop(); } },
+    HTMLMediaElement: MockHTMLMediaElement,
+    Audio: MockAudioElement,
     Float32Array, Uint8Array, Math, console, Date: { now: () => 0 },
     Blob: globalThis.Blob, ArrayBuffer, DataView, BigInt, Number, Promise,
   };
@@ -119,7 +138,7 @@ export async function loadEngine() {
   vm.createContext(sandbox);
   vm.runInContext(codecs, sandbox, { filename: "audio-codecs.js" });
   vm.runInContext(engine, sandbox, { filename: "audio-engine.js" });
-  return { win, MockAudioContext };
+  return { win, MockAudioContext, MockHTMLMediaElement };
 }
 
 // Load midi.js (a window-IIFE module) into a sandbox and return its exports.

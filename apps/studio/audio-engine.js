@@ -142,6 +142,11 @@
       this.label = label;
       this.buffer = null;
       this.source = null;
+      this.sources = [];
+      this.stemBuffers = null;
+      this.stemMuted = [false, false, false, false];
+      this.stemStatus = { state: "none", available: false, error: null };
+      this._loadToken = 0;
       this.startedAt = 0;
       this.offset = 0;
       this.playing = false;
@@ -238,6 +243,12 @@
       this.panner.connect(this.analyser);
       this.input = this.killSub;
       this.output = this.panner;
+      this.stemGains = Array.from({ length: 4 }, () => {
+        const gain = ctx.createGain();
+        gain.gain.value = 1;
+        gain.connect(this.input);
+        return gain;
+      });
 
       // playlist
       this.playlist = [];
@@ -252,6 +263,16 @@
     }
     setPan(v) { this.panner.pan.setTargetAtTime(v, this.ctx.currentTime, 0.01); }
     setAutoGain(on) { this.autoGain.gain.setTargetAtTime(on ? 1.7 : 1, this.ctx.currentTime, 0.05); }
+    setStemMuted(index, muted) {
+      if (index < 0 || index >= this.stemGains.length) return false;
+      this.stemMuted[index] = !!muted;
+      this.stemGains[index].gain.setTargetAtTime(muted ? 0 : 1, this.ctx.currentTime, 0.008);
+      return this.stemMuted[index];
+    }
+    toggleStem(index) { return this.setStemMuted(index, !this.stemMuted[index]); }
+    getStemState() {
+      return { ...this.stemStatus, muted: this.stemMuted.slice() };
+    }
     addToPlaylist(file) { this.playlist.push(file); }
     async loadPlaylistIndex(i) {
       if (!this.playlist[i]) return;
@@ -329,6 +350,12 @@
     }
 
     async load(file) {
+      const loadToken = ++this._loadToken;
+      const engineMetadata = file?.engineDJ || null;
+      this.stemBuffers = null;
+      this.stemStatus = engineMetadata?.hasStems
+        ? { state: "loading", available: false, error: null }
+        : { state: "none", available: false, error: null };
       const arr = await file.arrayBuffer();
       let buffer;
       try {
@@ -344,25 +371,81 @@
         }
         buffer = fallback;
       }
+      if (loadToken !== this._loadToken) return;
       this.buffer = buffer;
-      this.name = file.name;
+      this.name = engineMetadata?.title || file.name;
       this.file = file;
-      this.metadata = {};
+      this.metadata = engineMetadata ? {
+        title: engineMetadata.title,
+        artist: engineMetadata.artist,
+        album: engineMetadata.album,
+        bpm: engineMetadata.bpm,
+        artworkUrl: engineMetadata.artworkUrl,
+        source: "engine-dj",
+      } : {};
       const metadataReader = window.DubnatorTrackMetadata;
       if (metadataReader?.get) {
         metadataReader.get(file).then((metadata) => {
-          if (this.file === file) this.metadata = metadata || {};
+          if (this.file === file) this.metadata = { ...(metadata || {}), ...this.metadata };
         }).catch(() => {});
       }
-      this.analysis = null;
+      this.analysis = engineMetadata?.bpm ? {
+        bpm: Number(engineMetadata.bpm),
+        key: null,
+        confidence: 1,
+        tempoSource: "engine-dj",
+      } : null;
       this.offset = 0;
       this.loopA = 0; this.loopB = 0; // a new track clears any section loop
       this.cuePoint = null;
       this.stop();
+      if (engineMetadata?.stemFile) {
+        try {
+          // Decrypt and remux on demand: scanning a large Engine drive never
+          // reads every multi-megabyte stem file into memory.
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          const encrypted = await engineMetadata.stemFile.arrayBuffer();
+          const remuxed = window.DubnatorEngineDJ.decryptStemMp4(encrypted);
+          const pairOrder = window.DubnatorEngineDJ.STEM_PAIR_ORDER || [0, 3, 1, 2];
+          let decoded = null;
+          if (!window.__DUBNATOR_FORCE_STEM_FALLBACK) {
+            try { decoded = await this.ctx.decodeAudioData(remuxed.slice(0)); }
+            catch (nativeError) {
+              console.warn("Native Engine stems decode failed; using local WASM fallback", nativeError);
+            }
+          }
+          if (loadToken !== this._loadToken) return;
+          if (decoded?.numberOfChannels >= 8) {
+            this.stemBuffers = pairOrder.map((pair) => {
+              const stem = this.ctx.createBuffer(2, decoded.length, decoded.sampleRate);
+              for (let channel = 0; channel < 2; channel++) {
+                stem.getChannelData(channel).set(decoded.getChannelData(pair * 2 + channel));
+              }
+              return stem;
+            });
+          } else {
+            const fallback = await window.DubnatorEngineDJ.decodeStemMp4Fallback(this.ctx, remuxed);
+            if (loadToken !== this._loadToken) return;
+            this.stemBuffers = pairOrder.map((pair) => {
+              const stem = this.ctx.createBuffer(2, fallback.length, fallback.sampleRate);
+              for (let channel = 0; channel < 2; channel++) {
+                stem.getChannelData(channel).set(fallback.physicalPairs[pair][channel]);
+              }
+              return stem;
+            });
+          }
+          this.stemStatus = { state: "ready", available: true, error: null };
+        } catch (error) {
+          if (loadToken !== this._loadToken) return;
+          console.error("Engine DJ stems could not be decoded", error);
+          this.stemBuffers = null;
+          this.stemStatus = { state: "error", available: false, error: error?.message || String(error) };
+        }
+      }
       // Populate the always-visible BPM/key readout without making the user
       // open the deck's secondary controls. Analysis runs on the next idle
       // opportunity and guards against a newer track replacing this buffer.
-      this.analyze().catch(() => {});
+      if (!this.analysis) this.analyze().catch(() => {});
     }
 
     async loadSynthetic(seed = 1) {
@@ -399,6 +482,8 @@
         }
       }
       this.buffer = buf;
+      this.stemBuffers = null;
+      this.stemStatus = { state: "none", available: false, error: null };
       this.name = seed === 1 ? "DUB LOOP A — 75 BPM" : "DUB LOOP B — 75 BPM";
       this.file = null;
       this.metadata = {};
@@ -410,19 +495,23 @@
 
     play() {
       if (!this.buffer || this.playing) return;
-      const source = this.ctx.createBufferSource();
-      this.source = source;
-      source.buffer = this.buffer;
-      // loopSingle (default) loops the track forever; when off, the track plays
-      // through once and onended fires so the deck can auto-advance a playlist.
-      source.loop = this.loopSingle !== false;
-      // Section loop (loop in/out): if a region is set, loop just that part.
-      if (this.loopB > this.loopA) {
+      const buffers = this.stemBuffers?.length === 4 ? this.stemBuffers : [this.buffer];
+      const when = this.ctx.currentTime + 0.01;
+      const sources = buffers.map((buffer, index) => {
+        const source = this.ctx.createBufferSource();
+        source.buffer = buffer;
+        source.loop = this.loopSingle !== false;
+        if (this.loopB > this.loopA) {
           source.loopStart = this.loopA;
-          source.loopEnd = this.loopB;
+          source.loopEnd = Math.min(this.loopB, buffer.duration);
           source.loop = true;
         }
-      source.connect(this.input);
+        source.connect(this.stemBuffers ? this.stemGains[index] : this.input);
+        return source;
+      });
+      const source = sources[0];
+      this.sources = sources;
+      this.source = source;
       source.onended = () => {
         // A previous source may finish after seek()/pause() has already
         // started a replacement. Its callback is no longer authoritative.
@@ -431,12 +520,13 @@
         if (this.loopSingle === false) {
           this.playing = false;
           this.source = null;
+          this.sources = [];
           this.offset = 0;
           if (typeof this.onTrackEnd === "function") this.onTrackEnd();
         }
       };
-      source.start(0, this.offset % this.buffer.duration);
-      this.startedAt = this.ctx.currentTime;
+      sources.forEach((item) => item.start(when, this.offset % item.buffer.duration));
+      this.startedAt = when;
       this.playing = true;
     }
     setLoopSingle(on) { this.loopSingle = on !== false; }
@@ -445,16 +535,16 @@
       const dur = this.buffer ? this.buffer.duration : Infinity;
       this.loopA = Math.max(0, Math.min(dur, a || 0));
       this.loopB = Math.max(0, Math.min(dur, b || 0)); // clamp so loopEnd never exceeds the buffer
-      if (this.source) {
+      this.sources.forEach((source) => {
         if (this.loopB > this.loopA) {
-          this.source.loopStart = this.loopA;
-          this.source.loopEnd = this.loopB;
-          this.source.loop = true;
+          source.loopStart = this.loopA;
+          source.loopEnd = Math.min(this.loopB, source.buffer.duration);
+          source.loop = true;
         } else {
-          this.source.loopStart = 0; this.source.loopEnd = 0;
-          this.source.loop = this.loopSingle !== false;
+          source.loopStart = 0; source.loopEnd = 0;
+          source.loop = this.loopSingle !== false;
         }
-      }
+      });
     }
     clearLoopRegion() { this.setLoopRegion(0, 0); }
     hasLoopRegion() { return this.loopB > this.loopA; }
@@ -464,22 +554,22 @@
       this.offset =
         (this.offset + (this.ctx.currentTime - this.startedAt)) %
         this.buffer.duration;
-      this.source._dubManualStop = true; // suppress the onended auto-advance
-      try {
-        this.source.stop();
-      } catch (e) {}
+      this.sources.forEach((source) => {
+        source._dubManualStop = true;
+        try { source.stop(); } catch (e) {}
+      });
       this.source = null;
+      this.sources = [];
       this.playing = false;
     }
 
     stop() {
-      if (this.source) {
-        this.source._dubManualStop = true; // suppress the onended auto-advance
-        try {
-          this.source.stop();
-        } catch (e) {}
-        this.source = null;
-      }
+      this.sources.forEach((source) => {
+        source._dubManualStop = true;
+        try { source.stop(); } catch (e) {}
+      });
+      this.source = null;
+      this.sources = [];
       this.playing = false;
       this.offset = 0;
     }
@@ -1778,11 +1868,27 @@
       }
       if (!id) { this._teardownElementOutput(); this._outputDeviceId = ""; return ""; }
       this._setupElementOutput();
-      try { await this.ctx.resume(); } catch (_) {}   // CRITICAL on WebKit, else the stream is silent
-      try { await this._outEl.play(); } catch (_) {}
-      await this._outEl.setSinkId(id);
-      this._outputDeviceId = id;
-      return id;
+      try {
+        // WebKit's transient user activation disappears at the first `await`.
+        // Invoke every protected operation synchronously from the select/click
+        // handler, then await their promises. The previous sequential awaits
+        // made setSinkId run one microtask too late and report
+        // "A user gesture is required" in the native Tauri app.
+        const sinkChange = this._outEl.setSinkId(id);
+        const resume = this.ctx.resume();
+        const playback = this._outEl.play();
+        await sinkChange;
+        try { await resume; } catch (_) {}
+        await playback;
+        this._outputDeviceId = id;
+        return id;
+      } catch (error) {
+        // Never leave the master disconnected from the system output after a
+        // failed selection.
+        this._teardownElementOutput();
+        this._outputDeviceId = "";
+        throw error;
+      }
     }
     _setupElementOutput() {
       if (this._outStreamDest) return;

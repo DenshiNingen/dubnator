@@ -6,7 +6,7 @@ let pass = 0, fail = 0;
 const ok = (cond, msg) => { if (cond) { pass++; } else { fail++; console.error("  ✗ " + msg); } };
 const section = (s) => console.log("\n• " + s);
 
-const { win } = await loadEngine();
+const { win, MockHTMLMediaElement } = await loadEngine();
 const eng = win.DubnatorEngine;
 
 section("engine constructs and exposes API");
@@ -90,6 +90,21 @@ ok(typeof eng.listOutputDevices === "function", "listOutputDevices exists");
 ok(typeof eng.setOutputDevice === "function" && typeof eng.canSetOutput === "function", "output setters exist");
 ok(eng.outputDeviceId() === "", "no output device selected by default");
 { const list = await eng.listOutputDevices(); ok(Array.isArray(list), "listOutputDevices returns an array"); }
+{
+  // WebKit only carries transient activation through the synchronous part of
+  // the event handler. Dropping it immediately after calling the async method
+  // reproduces the native app; setSinkId/play must already have been invoked.
+  MockHTMLMediaElement.userActivated = true;
+  const switching = eng.setOutputDevice("studio-output");
+  MockHTMLMediaElement.userActivated = false;
+  let switched = false;
+  let switchError = null;
+  try { await switching; switched = true; } catch (error) { switchError = error; }
+  ok(switched && eng.outputDeviceId() === "studio-output",
+    `WebKit output switch consumes the original user gesture synchronously${switchError ? ` (${switchError.message})` : ""}`);
+  await eng.setOutputDevice();
+  ok(eng.outputDeviceId() === "", "returning to system output restores the direct master route");
+}
 
 section("web line input (In1 → deck chain)");
 ok(typeof eng.enableLineInput === "function", "enableLineInput exists");

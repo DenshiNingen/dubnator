@@ -82,6 +82,14 @@ test("visual feedback work pauses or throttles when it cannot help the user", ()
   assert.doesNotMatch(bootstrap, /setInterval/);
 });
 
+test("native output routing uses an explicit user-gesture button", () => {
+  assert.match(app, /value=\{pendingOutDeviceId\}/);
+  assert.match(app, /onClick=\{\(\) => onPickOutput\(pendingOutDeviceId\)\}/);
+  assert.match(app, />\s*APPLY OUTPUT\s*<\/button>/);
+  assert.doesNotMatch(app, /onChange=\{\(e\) => onPickOutput\(e\.target\.value\)\}/);
+  assert.doesNotMatch(app, /if \(selected\?\.deviceId\) \{\s*await eng\.setOutputDevice/);
+});
+
 test("labels every main rack region for stable responsive placement", () => {
   for (const className of [
     "rack-music",

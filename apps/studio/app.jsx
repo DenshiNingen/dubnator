@@ -392,6 +392,13 @@ function DeckFocusCard({
     : `${Math.round(zoomSeconds)}s`;
   const hasTrack = !!engineDeck?.buffer;
   const hasPlaylistNavigation = (liveState.playlist?.length || 0) > 1;
+  const stemState = liveState.stems || engineDeck?.getStemState?.() || { state: "none", available: false, muted: [false, false, false, false] };
+  const stemNames = window.DubnatorEngineDJ?.STEM_NAMES || ["VOCALS", "MELODY", "BASS", "DRUMS"];
+  const toggleStem = (index) => {
+    if (!engineDeck?.getStemState || !stemState.available) return;
+    engineDeck.toggleStem(index);
+    setState((current) => ({ ...current, stems: engineDeck.getStemState() }));
+  };
   const runAnalysis = async () => {
     if (!engineDeck?.buffer || !engineDeck.analyze || analyzing) return;
     setAnalyzing(true);
@@ -520,6 +527,21 @@ function DeckFocusCard({
       </div>
 
       <div className="deck-focus-controls">
+        {stemState.state !== "none" && <div className={`deck-focus-stems ${stemState.state}`} aria-label={`Deck ${label} stem controls`}>
+          <div className="deck-focus-stems-head mono">
+            <span>ENGINE STEMS</span>
+            <small>{stemState.state === "loading" ? "DECODING…" : stemState.state === "ready" ? "4 STEMS READY" : stemState.state === "error" ? `UNAVAILABLE · ${stemState.error || "DECODE ERROR"}` : "NO STEMS"}</small>
+          </div>
+          <div className="deck-focus-stem-buttons">
+            {stemNames.map((name, index) => (
+              <button key={name} className={`btn stem-${index} ${stemState.muted?.[index] ? "muted active" : ""}`}
+                onClick={() => toggleStem(index)} disabled={!stemState.available}
+                aria-pressed={!!stemState.muted?.[index]} title={`${stemState.muted?.[index] ? "Unmute" : "Mute"} ${name.toLowerCase()}`}>
+                <b>{stemState.muted?.[index] ? "MUTED" : "ON"}</b><small>{name}</small>
+              </button>
+            ))}
+          </div>
+        </div>}
         <div className="deck-focus-control-group deck-focus-transport" aria-label={`Deck ${label} transport`}>
           <button className="btn" onClick={onPrev} disabled={!hasPlaylistNavigation}
             aria-label={`Previous track on Deck ${label}`} title="Previous playlist track">
@@ -747,8 +769,8 @@ function App() {
   }, [ready]);
 
   // === decks ===
-  const [deckA, setDeckA] = useState({ name: "—", time: 0, dur: 0, playing: false, gain: 0.85, pan: 0, mute: false, autoGain: false, rewindLen: 4, playlist: [], playlistIdx: 0, cued: false, loopOn: false, loopIn: 0, loopInArmed: false, loopBeats: null, analysis: null, metadata: {} });
-  const [deckB, setDeckB] = useState({ name: "—", time: 0, dur: 0, playing: false, gain: 0.85, pan: 0, mute: false, autoGain: false, rewindLen: 4, playlist: [], playlistIdx: 0, cued: false, loopOn: false, loopIn: 0, loopInArmed: false, loopBeats: null, analysis: null, metadata: {} });
+  const [deckA, setDeckA] = useState({ name: "—", time: 0, dur: 0, playing: false, gain: 0.85, pan: 0, mute: false, autoGain: false, rewindLen: 4, playlist: [], playlistIdx: 0, cued: false, loopOn: false, loopIn: 0, loopInArmed: false, loopBeats: null, analysis: null, metadata: {}, stems: { state: "none", available: false, muted: [false, false, false, false] } });
+  const [deckB, setDeckB] = useState({ name: "—", time: 0, dur: 0, playing: false, gain: 0.85, pan: 0, mute: false, autoGain: false, rewindLen: 4, playlist: [], playlistIdx: 0, cued: false, loopOn: false, loopIn: 0, loopInArmed: false, loopBeats: null, analysis: null, metadata: {}, stems: { state: "none", available: false, muted: [false, false, false, false] } });
   const [crossfade, setCrossfade] = useState(0.5);
   const [crossfadeCurve, setCrossfadeCurve] = useState("power"); // power | linear | sharp
   const [playlistOpen, setPlaylistOpen] = useState(null); // null | "A" | "B"
@@ -1223,7 +1245,8 @@ function App() {
       // too. Transport actions are intentionally imperative, so relying only
       // on their click handlers left UI state stale after seek/auto-advance.
       for (const [key, deck, setter] of [["A", eng.deckA, setDeckA], ["B", eng.deckB, setDeckB]]) {
-        const next = `${deck.playing ? 1 : 0}:${deck.hasCue() ? 1 : 0}:${deck.playlistIdx}:${deck.name}`;
+        const stemState = deck.getStemState?.();
+        const next = `${deck.playing ? 1 : 0}:${deck.hasCue() ? 1 : 0}:${deck.playlistIdx}:${deck.name}:${stemState?.state || "none"}:${stemState?.muted?.map(Number).join("") || ""}`;
         if (lastTransport[key] !== next) {
           lastTransport[key] = next;
           setter((state) => ({
@@ -1232,6 +1255,9 @@ function App() {
             cued: deck.hasCue(),
             playlistIdx: deck.playlistIdx,
             name: deck.name || state.name,
+            metadata: deck.metadata || state.metadata,
+            analysis: deck.analysis || state.analysis,
+            stems: stemState || state.stems,
           }));
         }
       }
@@ -1246,6 +1272,13 @@ function App() {
   const playB = async () => { await init(); if (eng.canDeckPlay && !eng.canDeckPlay("B")) return; eng.deckB.playing ? eng.deckB.pause() : eng.deckB.play(); setDeckB((s) => ({ ...s, playing: eng.deckB.playing })); };
   const stopA = () => { if (!eng.deckA) return; eng.deckA.stop(); setDeckA((s) => ({ ...s, playing: false, time: 0 })); };
   const stopB = () => { if (!eng.deckB) return; eng.deckB.stop(); setDeckB((s) => ({ ...s, playing: false, time: 0 })); };
+  const setDeckStemMuted = (label, index, muted) => {
+    const deck = label === "A" ? eng.deckA : eng.deckB;
+    const setter = label === "A" ? setDeckA : setDeckB;
+    if (!deck?.getStemState?.().available) return;
+    deck.setStemMuted(index, muted);
+    setter((state) => ({ ...state, stems: deck.getStemState() }));
+  };
 
   const triggerSample = (i) => {
     // Fire the sound synchronously inside the key/pointer handler when the engine
@@ -1591,8 +1624,16 @@ function App() {
       "aux.echolevel": (v) => setAuxLevels((s) => ({ ...s, echo: v })),
       "deckA.cue": (v) => { if (v > 0.5) { eng.deckA.setCue(); setDeckA((s) => ({ ...s, cued: true })); } },
       "deckA.jumpcue": (v) => { if (v > 0.5) eng.deckA.jumpToCue(); },
+      "deckA.stem.vocals": (v) => actionsRef.current.deckStem?.("A", 0, v > 0.5),
+      "deckA.stem.melody": (v) => actionsRef.current.deckStem?.("A", 1, v > 0.5),
+      "deckA.stem.bass": (v) => actionsRef.current.deckStem?.("A", 2, v > 0.5),
+      "deckA.stem.drums": (v) => actionsRef.current.deckStem?.("A", 3, v > 0.5),
       "deckB.cue": (v) => { if (v > 0.5) { eng.deckB.setCue(); setDeckB((s) => ({ ...s, cued: true })); } },
       "deckB.jumpcue": (v) => { if (v > 0.5) eng.deckB.jumpToCue(); },
+      "deckB.stem.vocals": (v) => actionsRef.current.deckStem?.("B", 0, v > 0.5),
+      "deckB.stem.melody": (v) => actionsRef.current.deckStem?.("B", 1, v > 0.5),
+      "deckB.stem.bass": (v) => actionsRef.current.deckStem?.("B", 2, v > 0.5),
+      "deckB.stem.drums": (v) => actionsRef.current.deckStem?.("B", 3, v > 0.5),
       // round 3 — deck/input levels, EQ bands, FX trims
       "deckA.gain": (v) => setDeckA((s) => ({ ...s, gain: +(v * 1.5).toFixed(3) })),
       "deckA.pan": (v) => setDeckA((s) => ({ ...s, pan: +((v - 0.5) * 2).toFixed(2) })),
@@ -1902,7 +1943,15 @@ function App() {
       "siren.bits": clamp((siren.bits - 2) / 14), "siren.sr": clamp(siren.sr),
       "aux.revlevel": clamp(auxLevels.rev), "aux.echolevel": clamp(auxLevels.echo),
       "deckA.cue": deckA.cued ? 1 : 0, "deckA.jumpcue": 0,
+      "deckA.stem.vocals": deckA.stems?.muted?.[0] ? 1 : 0,
+      "deckA.stem.melody": deckA.stems?.muted?.[1] ? 1 : 0,
+      "deckA.stem.bass": deckA.stems?.muted?.[2] ? 1 : 0,
+      "deckA.stem.drums": deckA.stems?.muted?.[3] ? 1 : 0,
       "deckB.cue": deckB.cued ? 1 : 0, "deckB.jumpcue": 0,
+      "deckB.stem.vocals": deckB.stems?.muted?.[0] ? 1 : 0,
+      "deckB.stem.melody": deckB.stems?.muted?.[1] ? 1 : 0,
+      "deckB.stem.bass": deckB.stems?.muted?.[2] ? 1 : 0,
+      "deckB.stem.drums": deckB.stems?.muted?.[3] ? 1 : 0,
       "deckA.gain": clamp(deckA.gain / 1.5), "deckA.pan": clamp(deckA.pan / 2 + 0.5),
       "deckB.gain": clamp(deckB.gain / 1.5), "deckB.pan": clamp(deckB.pan / 2 + 0.5),
       "in1.gain": clamp(inputs.in1.gain / 1.5), "in2.gain": clamp(inputs.in2.gain / 1.5),
@@ -1992,6 +2041,16 @@ function App() {
       ])),
     };
   };
+  const midiAvailability = () => ({
+    "deckA.stem.vocals": !!deckA.stems?.available,
+    "deckA.stem.melody": !!deckA.stems?.available,
+    "deckA.stem.bass": !!deckA.stems?.available,
+    "deckA.stem.drums": !!deckA.stems?.available,
+    "deckB.stem.vocals": !!deckB.stems?.available,
+    "deckB.stem.melody": !!deckB.stems?.available,
+    "deckB.stem.bass": !!deckB.stems?.available,
+    "deckB.stem.drums": !!deckB.stems?.available,
+  });
   const toggleMidiPickup = () => {
     const m = mapperRef.current; if (!m) return;
     const on = !midiPickup;
@@ -2096,6 +2155,23 @@ function App() {
       // deck tools are open. Their text/select/slider controls are still
       // protected by interactive(), while Help and MIDI mapping stay modal.
       if (helpOpen || midiOpen) return;
+
+      // Engine DJ stems: Alt+1…4 controls Deck A, Alt+5…8 Deck B, in the
+      // official order Vocals / Melody / Bass / Drums.
+      if (e.altKey && !shift && /^[1-8]$/.test(k)) {
+        e.preventDefault();
+        if (e.repeat) return;
+        const digit = Number(k) - 1;
+        const label = digit < 4 ? "A" : "B";
+        const index = digit % 4;
+        const deck = label === "A" ? eng.deckA : eng.deckB;
+        const setter = label === "A" ? setDeckA : setDeckB;
+        if (deck?.getStemState?.().available) {
+          deck.toggleStem(index);
+          setter((state) => ({ ...state, stems: deck.getStemState() }));
+        }
+        return;
+      }
 
       // ---- Screen views (mirror the SETUP / AUDIO / PANEL display tabs) ----
       if (shift && kl === "a") { e.preventDefault(); setMainView("display"); setDisplayMode(m => m === "image" ? "spectrum" : m); return; } // Audio
@@ -2568,20 +2644,26 @@ function App() {
   };
   const [outDevices, setOutDevices] = useState([]);
   const [outDeviceId, setOutDeviceId] = useState("");
+  const [pendingOutDeviceId, setPendingOutDeviceId] = useState("");
   const [outErr, setOutErr] = useState("");
   useEffect(() => {
     if (!ready || !eng.canSetOutput || !eng.canSetOutput()) return;
     eng.listOutputDevices().then(setOutDevices).catch(() => {});
   }, [ready]);
   const onPickOutput = async (id) => {
-    // Only commit the selection if the actual switch succeeds, so the dropdown
-    // can't show a device the audio isn't routed to.
+    // This must be called directly by a button click. WebKit does not reliably
+    // grant transient activation to a <select> change event, and setSinkId then
+    // rejects with "A user gesture is required" in the native app.
     try {
       await eng.setOutputDevice(id || undefined);
       setOutDeviceId(id);
+      setPendingOutDeviceId(id);
       setOutErr("");
     } catch (error) {
-      setOutErr(error?.message || "Could not switch audio output.");
+      const message = /user gesture/i.test(error?.message || "")
+        ? "CLICK APPLY OUTPUT TO AUTHORIZE THE CHANGE"
+        : error?.message || "Could not switch audio output.";
+      setOutErr(message);
     }
   };
   const scanOutputs = async () => {
@@ -2591,15 +2673,17 @@ function App() {
       const selected = eng.requestOutputDevice
         ? await eng.requestOutputDevice(outDeviceId || undefined)
         : null;
+      // Do not route after this await: WebKit has consumed the original click by
+      // the time its picker/permission promise resolves. Stage the choice and let
+      // the explicit APPLY OUTPUT click perform setSinkId.
+      if (selected?.deviceId) {
+        setPendingOutDeviceId(selected.deviceId);
+      }
       const list = await eng.listOutputDevices();
       const merged = selected && !list.some((device) => device.deviceId === selected.deviceId)
         ? [selected, ...list]
         : list;
       setOutDevices(merged);
-      if (selected?.deviceId) {
-        await eng.setOutputDevice(selected.deviceId);
-        setOutDeviceId(selected.deviceId);
-      }
       setOutErr(merged.length
         ? ""
         : "No selectable outputs were exposed. The system default remains active.");
@@ -2723,6 +2807,7 @@ function App() {
   liveStateRef.current.multiOn = multiOn;
   actionsRef.current = {
     deckLoop: deckLoopFromSurface,
+    deckStem: setDeckStemMuted,
     tapTempo,
     echoDub: applyDubEchoPreset,
     echoThrow: setEchoThrow,
@@ -2740,7 +2825,7 @@ function App() {
   // while deck time/meters are updating elsewhere.
   useEffect(() => {
     if (!launchpadRef.current) return;
-    launchpadRef.current.sync(midiValues01());
+    launchpadRef.current.sync(midiValues01(), midiAvailability());
   }, [
     ready, master, echo, reverb, dubFilter, siren, sampleFx, crossfade,
     crossfadeCurve, kills, killTrims, killFreqs, killQ, flatGain, musicSends,
@@ -3157,13 +3242,21 @@ function App() {
                     </div>
                   )}
                   {outDevices.filter((d) => d.deviceId && d.deviceId !== "default").length > 0 && (
-                    <select className="mic-device-select mono" value={outDeviceId}
-                      onChange={(e) => onPickOutput(e.target.value)} title="Master output device">
+                    <select className="mic-device-select mono" value={pendingOutDeviceId}
+                      onChange={(e) => { setPendingOutDeviceId(e.target.value); setOutErr(""); }}
+                      title="Choose a master output device, then click Apply Output">
                       <option value="">System default</option>
                       {outDevices.filter((d) => d.deviceId && d.deviceId !== "default").map((d) => (
                         <option key={d.deviceId} value={d.deviceId}>{d.label}</option>
                       ))}
                     </select>
+                  )}
+                  {outDevices.filter((d) => d.deviceId && d.deviceId !== "default").length > 0 && (
+                    <button className="btn-xs btn" onClick={() => onPickOutput(pendingOutDeviceId)}
+                      disabled={pendingOutDeviceId === outDeviceId}
+                      title="Apply the selected master output using this click as WebKit authorization">
+                      APPLY OUTPUT
+                    </button>
                   )}
                   <button className="btn-xs btn" onClick={scanOutputs}
                     title="Open the browser output picker, or request device permission when unavailable">

@@ -104,10 +104,42 @@ function setup() {
 test("dual layout covers the complete performance catalog", () => {
   const manager = new LaunchpadMiniMk3Manager({ catalog });
   const mapped = new Set(manager.allMappedIds());
-  assert.equal(catalog.length, 202);
+  assert.equal(catalog.length, 210);
   assert.equal(catalog.filter((control) => !mapped.has(control.id)).length, 0);
   assert.equal(manager.pages.length, 2);
   assert.ok(manager.pages.every((role) => role.length === 8));
+});
+
+test("deck pages keep all four Engine stems together on the bottom row", () => {
+  const manager = new LaunchpadMiniMk3Manager({ catalog });
+  for (const [pageIndex, prefix] of [[1, "deckA"], [2, "deckB"]]) {
+    const layout = manager._layout({ role: 0, page: pageIndex });
+    const bottom = [3, 4, 5, 6].map((column) => layout.gridButtons.get(`7:${column}`));
+    assert.deepEqual(bottom, [
+      `${prefix}.stem.vocals`, `${prefix}.stem.melody`,
+      `${prefix}.stem.bass`, `${prefix}.stem.drums`,
+    ]);
+  }
+});
+
+test("stem pads disappear and ignore input when the loaded track has no stems", () => {
+  const { manager, sent, fired } = setup();
+  manager.selectPage(0, 1, "test");
+  const availability = Object.fromEntries([
+    "vocals", "melody", "bass", "drums",
+  ].map((stem) => [`deckA.stem.${stem}`, false]));
+  manager.sync({ "deckA.stem.vocals": 0 }, availability);
+  const unavailableFrame = sent.filter(({ outputId, message }) => outputId === "out-a" && message[6] === 3).at(-1).message;
+  assert.equal(frameColour(unavailableFrame, gridNote(7, 3)), 0, "unavailable stem LED is completely off");
+
+  manager.handleMidi({ deviceId: "in-a", data: [0x90, gridNote(7, 3), 127] });
+  assert.equal(fired.some(({ id }) => id === "deckA.stem.vocals"), false, "unavailable pad is consumed without dispatch");
+
+  manager.sync({ "deckA.stem.vocals": 0 }, { ...availability, "deckA.stem.vocals": true });
+  const availableFrame = sent.filter(({ outputId, message }) => outputId === "out-a" && message[6] === 3).at(-1).message;
+  assert.equal(frameColour(availableFrame, gridNote(7, 3)), PALETTES.magenta.dim);
+  manager.handleMidi({ deviceId: "in-a", data: [0x90, gridNote(7, 3), 127] });
+  assert.equal(fired.at(-1).id, "deckA.stem.vocals");
 });
 
 test("LED colours communicate function and distinguish bank slots", () => {

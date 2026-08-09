@@ -98,6 +98,19 @@ test("artwork, shared playlists and Rekordbox ordering work together", async ({ 
   await expect(page.locator(".pl-row .c-name b").nth(0)).toHaveText("First Dub");
   await expect(page.locator(".pl-row .c-name b").nth(1)).toHaveText("Second Dub");
 
+  await page.getByRole("button", { name: "LIBRARY…" }).click();
+  await expect(page.locator(".engine-browser-tree")).toBeVisible();
+  await expect(page.locator(".engine-browser-detail")).toBeVisible();
+  await page.locator(".engine-browser-playlist").filter({ hasText: "Dub Order" }).click();
+  await expect(page.locator(".engine-browser-title")).toContainText("Dub Order");
+  await expect(page.locator(".engine-track-row")).toHaveCount(2);
+  await expect(page.locator(".engine-track-name").nth(0)).toContainText("First Dub");
+  await testInfo.attach("playlist-master-detail", {
+    body: await page.locator(".playlist-modal").screenshot(),
+    contentType: "image/png",
+  });
+  await page.getByRole("button", { name: /BACK TO DECK-A/ }).click();
+
   await page.locator(".pl-link-toggle").click();
   await expect(page.locator(".pl-link-toggle")).toHaveAttribute("aria-pressed", "false");
   const third = wavFile("03 Third.wav", "Third Dub", [80, 220, 120]);
@@ -124,4 +137,40 @@ test("restores a local deck playlist after a reload", async ({ page }, testInfo)
   await page.keyboard.press("Space");
   await expect(page.locator(".playlist-modal")).toBeVisible();
   await expect(page.locator(".pl-row .c-name b")).toHaveText("Persisted Dub");
+});
+
+test("playlist master-detail browser stacks cleanly on compact screens", async ({ page }, testInfo) => {
+  test.skip(!["tablet-portrait", "mobile-portrait"].includes(testInfo.project.name), "compact layout audit only");
+  await page.goto("/");
+  await page.locator("body").click({ position: { x: 20, y: 20 } });
+  await page.keyboard.press("Space");
+
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+    <DJ_PLAYLISTS Version="1.0.0">
+      <COLLECTION Entries="2">
+        <TRACK TrackID="1" Name="Compact One" Artist="Tester" Location="file://localhost/Music/compact-one.wav" />
+        <TRACK TrackID="2" Name="Compact Two" Artist="Tester" Location="file://localhost/Music/compact-two.wav" />
+      </COLLECTION>
+      <PLAYLISTS><NODE Type="0" Name="ROOT"><NODE Type="0" Name="USB"><NODE Type="1" Name="Compact Set" Entries="2">
+        <TRACK Key="1"/><TRACK Key="2"/>
+      </NODE></NODE></NODE></PLAYLISTS>
+    </DJ_PLAYLISTS>`;
+  await page.locator('.playlist-modal input[accept*=".xml"]').first().setInputFiles({
+    name: "compact.xml",
+    mimeType: "application/xml",
+    buffer: Buffer.from(xml),
+  });
+  await page.getByRole("button", { name: /BACK TO DECK-A/ }).click();
+  await page.getByRole("button", { name: "LIBRARY…" }).click();
+  await page.locator(".engine-browser-playlist").filter({ hasText: "Compact Set" }).click();
+
+  const tree = await page.locator(".engine-browser-tree").boundingBox();
+  const detail = await page.locator(".engine-browser-detail").boundingBox();
+  const viewport = page.viewportSize();
+  expect(tree).not.toBeNull();
+  expect(detail).not.toBeNull();
+  if (viewport.width <= 760) expect(detail.y).toBeGreaterThan(tree.y);
+  else expect(detail.x).toBeGreaterThan(tree.x);
+  expect(Math.max(tree.x + tree.width, detail.x + detail.width)).toBeLessThanOrEqual(viewport.width + 1);
+  await expect(page.locator(".engine-track-row")).toHaveCount(2);
 });
