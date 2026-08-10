@@ -477,8 +477,28 @@
         }
       }
     }
-    reportProgress(options, "Reading drive directory", 0.02, rootHandle.name || "Selected drive");
-    await visit(rootHandle, rootHandle.name === "Engine Library" ? "Engine Library" : "");
+    let libraryHandle = rootHandle;
+    if (String(rootHandle.name || "").toLowerCase() !== "engine library" && rootHandle.getDirectoryHandle) {
+      try {
+        // A drive root can contain hundreds of thousands of unrelated files.
+        // Jump straight to Engine Library so the first import does not block
+        // inside the browser's opaque whole-drive enumeration.
+        libraryHandle = await rootHandle.getDirectoryHandle("Engine Library");
+      } catch (_) {
+        // A directly selected Engine Library (or older handle mock) still uses
+        // the proven recursive fallback below.
+      }
+    }
+    const librarySelected = libraryHandle !== rootHandle
+      || String(libraryHandle.name || "").toLowerCase() === "engine library";
+    reportProgress(
+      options,
+      librarySelected ? "Reading Engine Library" : "Reading selected directory",
+      0.02,
+      libraryHandle.name || rootHandle.name || "Selected drive",
+    );
+    await nextPaint();
+    await visit(libraryHandle, librarySelected ? "Engine Library" : "");
     return files;
   }
 

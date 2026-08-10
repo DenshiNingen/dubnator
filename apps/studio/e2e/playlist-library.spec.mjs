@@ -126,6 +126,54 @@ test("artwork, shared playlists and Rekordbox ordering work together", async ({ 
   await expect(page.locator(".pl-deck-tab").nth(1)).toContainText("2");
 });
 
+test("large Engine folders collapse without selecting or mounting every track", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-wide", "one large-library pass is sufficient");
+  await page.goto("/");
+  await page.evaluate(async () => {
+    const tracks = Array.from({ length: 5_000 }, (_, index) => ({
+      name: `Track ${String(index + 1).padStart(5, "0")}.mp3`,
+      title: `Track ${String(index + 1).padStart(5, "0")}`,
+      artist: `Artist ${index % 100}`,
+      bpm: 80 + (index % 80),
+      duration: 180 + (index % 120),
+    }));
+    const playlists = [
+      { id: "engine:artists", name: "ByArtistsss", path: "ByArtistsss", source: "engine-dj", tracks },
+      { id: "engine:artist-one", name: "Artist One", path: "ByArtistsss / Artist One", source: "engine-dj", tracks: tracks.slice(0, 2) },
+    ];
+    await new Promise((resolve, reject) => {
+      const request = indexedDB.open("dubnator-playlist-catalogue", 2);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains("catalogue")) request.result.createObjectStore("catalogue");
+      };
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const transaction = request.result.transaction("catalogue", "readwrite");
+        transaction.objectStore("catalogue").put({ version: 1, updated: Date.now(), playlists }, "root");
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+      };
+    });
+  });
+
+  await page.locator("body").click({ position: { x: 20, y: 20 } });
+  await page.keyboard.press("Space");
+  await page.getByRole("button", { name: "LIBRARY…" }).click();
+  const folder = page.locator(".engine-browser-folder").filter({ hasText: "ByArtistsss" });
+  await expect(folder).toBeVisible();
+  await page.locator(".engine-browser-playlist").filter({ hasText: "Artist One" }).click();
+  await expect(page.locator(".engine-browser-title")).toContainText("Artist One");
+
+  await folder.getByRole("button", { name: "Collapse ByArtistsss folder" }).click();
+  await expect(page.locator(".engine-browser-title")).toContainText("Artist One");
+  await expect(page.locator(".engine-browser-playlist").filter({ hasText: "Artist One" })).toHaveCount(0);
+
+  await folder.getByRole("button", { name: "View ByArtistsss playlist" }).click();
+  await expect(page.locator(".engine-browser-title")).toContainText("ByArtistsss");
+  await expect(page.locator(".engine-track-row")).toHaveCount(200);
+  await expect(page.locator(".engine-track-pagination")).toContainText("1 / 25");
+});
+
 test("restores a local deck playlist after a reload", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-wide", "one persistence pass is sufficient");
   await page.goto("/");

@@ -5467,8 +5467,6 @@ input[type="range"]:disabled { opacity: 0.35; }
 }
 .engine-browser-folder {
   min-height: 28px;
-  gap: 5px;
-  padding-right: 7px;
   background: rgba(255,255,255,.018);
   font: 700 8px/1 var(--mono);
 }
@@ -5479,13 +5477,40 @@ input[type="range"]:disabled { opacity: 0.35; }
   background: linear-gradient(90deg, rgba(53,179,227,.18), rgba(31,70,88,.05));
   box-shadow: inset 2px 0 #55c9ff;
 }
-.engine-browser-folder > strong {
+.engine-browser-folder-toggle {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px 0 9px;
+  color: inherit;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.engine-browser-folder-toggle > strong {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.engine-browser-folder > small { margin-left: auto; color: #4c5963; font-size: 7px; }
+.engine-browser-folder-toggle > small { margin-left: auto; color: #4c5963; font-size: 7px; }
+.engine-browser-folder-open {
+  flex: 0 0 auto;
+  padding: 0 7px;
+  color: #557080;
+  border: 0;
+  border-left: 1px solid #1b252b;
+  background: transparent;
+  font: 800 6px/1 var(--mono);
+  letter-spacing: .08em;
+  cursor: pointer;
+}
+.engine-browser-folder-open:hover,
+.engine-browser-folder-open[aria-pressed="true"] { color: #7ddcff; background: rgba(53,179,227,.12); }
 .engine-browser-icon { color: #657681; font-size: 7px; }
 .engine-browser-playlist {
   min-height: 38px;
@@ -5651,6 +5676,35 @@ input[type="range"]:disabled { opacity: 0.35; }
   overflow: auto;
   overscroll-behavior: contain;
 }
+.engine-track-pagination {
+  display: grid;
+  min-height: 30px;
+  flex: 0 0 auto;
+  grid-template-columns: 64px minmax(0, 1fr) 64px;
+  align-items: center;
+  border-top: 1px solid #1b242a;
+  background: #090d10;
+}
+.engine-track-pagination span {
+  overflow: hidden;
+  color: #63717b;
+  font: 700 7px/1 var(--mono);
+  letter-spacing: .06em;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.engine-track-pagination button {
+  height: 100%;
+  padding: 0;
+  color: #55c9ff;
+  border: 0;
+  background: transparent;
+  font: 800 7px/1 var(--mono);
+  cursor: pointer;
+}
+.engine-track-pagination button:hover:not(:disabled) { background: rgba(53,179,227,.1); }
+.engine-track-pagination button:disabled { color: #2e3940; cursor: default; }
 .engine-track-row {
   min-height: 43px;
   color: #697680;

@@ -6,6 +6,8 @@ const trackMetadata = window.DubnatorTrackMetadata;
 const rekordbox = window.DubnatorRekordbox;
 const engineDJ = window.DubnatorEngineDJ;
 
+const LIBRARY_TRACK_PAGE_SIZE = 200;
+
 const trackKey = (file) => `${file?.name || ""}|${file?.size || 0}|${file?.lastModified || 0}`;
 const isAudioFile = (file) => !!file && (
   file.type?.startsWith("audio/")
@@ -125,6 +127,7 @@ function PlaylistModal({
   const [selectedLibraryId, setSelectedLibraryId] = useState(null);
   const [libraryTrackFilter, setLibraryTrackFilter] = useState("");
   const [libraryTrackSort, setLibraryTrackSort] = useState({ key: "position", direction: "asc" });
+  const [libraryTrackPage, setLibraryTrackPage] = useState(0);
   // Reconcile state for loading: when user picks a saved set, we need files from disk.
   // shape: { id, name, tracks: [...names], pickedFiles: Map<lower(name), File>, missing: [names] }
   const [reconcile, setReconcile] = useState(null);
@@ -252,6 +255,33 @@ function PlaylistModal({
     (playlist.id || playlist.path) === selectedLibraryId
   )) || null, [libraryPlaylists, selectedLibraryId]);
 
+  const selectedLibraryView = useMemo(() => {
+    if (!selectedLibraryPlaylist) return null;
+    const liveFiles = selectedLibraryPlaylist.files || [];
+    const catalogueTracks = selectedLibraryPlaylist.trackRefs?.length
+      ? selectedLibraryPlaylist.trackRefs
+      : (selectedLibraryPlaylist.tracks || []);
+    const previewTracks = liveFiles.length
+      ? liveFiles.map((file, index) => ({ file, index, info: { ...(file.engineDJ || {}) } }))
+      : catalogueTracks.map((track, index) => ({
+        file: null,
+        index,
+        info: track && typeof track === "object"
+          ? track
+          : { name: String(track || ""), title: String(track || "") },
+      }));
+    const query = libraryTrackFilter.trim().toLowerCase();
+    const visibleTracks = sortLibraryTracks(previewTracks.filter(({ file, info }) => !query || (
+      `${info.title || file?.name || info.name || ""} ${info.artist || ""} ${info.album || ""} ${info.genre || ""}`.toLowerCase().includes(query)
+    )), libraryTrackSort);
+    return {
+      liveFiles,
+      previewTracks,
+      visibleTracks,
+      stemCount: previewTracks.filter(({ info }) => info.hasStems).length,
+    };
+  }, [selectedLibraryPlaylist, libraryTrackFilter, libraryTrackSort]);
+
   useEffect(() => {
     if (!libraryPlaylists.length) {
       if (selectedLibraryId != null) setSelectedLibraryId(null);
@@ -265,6 +295,18 @@ function PlaylistModal({
   }, [libraryPlaylists, selectedLibraryId]);
 
   useEffect(() => { setLibraryTrackFilter(""); }, [selectedLibraryId]);
+  useEffect(() => { setLibraryTrackPage(0); }, [
+    selectedLibraryId,
+    libraryTrackFilter,
+    libraryTrackSort.key,
+    libraryTrackSort.direction,
+  ]);
+
+  const toggleLibraryFolder = (path) => setLibraryCollapsed((current) => {
+    const next = new Set(current);
+    if (next.has(path)) next.delete(path); else next.add(path);
+    return next;
+  });
 
   const changeLibraryTrackSort = (key) => {
     setLibraryTrackSort((current) => current.key === key
@@ -672,18 +714,21 @@ function PlaylistModal({
     event.target.value = "";
   };
 
-  const importEngineDrive = async (filesInput) => {
+  const importEngineDrive = async (filesInput = null) => {
     if (!engineDJ?.scanFiles) return;
     setEngineScan({ state: "scanning", message: "Opening Engine DJ drive", detail: "Preparing file index", progress: 0.02 });
     try {
-      const result = await engineDJ.scanFiles(filesInput, {
+      const options = {
         onProgress: ({ message, detail, progress }) => setEngineScan({
           state: "scanning",
           message,
           detail,
           progress: Math.max(0, Math.min(1, Number(progress) || 0)),
         }),
-      });
+      };
+      const result = filesInput
+        ? await engineDJ.scanFiles(filesInput, options)
+        : await engineDJ.chooseAndScan(options);
       const merged = [
         ...libraryPlaylists.filter((playlist) => playlist.source !== "engine-dj"),
         ...result.playlists,
@@ -706,6 +751,10 @@ function PlaylistModal({
       setView("library");
       showToast(`Engine DJ ready · ${result.playlists.length} playlists · ${result.stemCount} stems`, "ok");
     } catch (error) {
+      if (error?.name === "AbortError") {
+        setEngineScan(null);
+        return;
+      }
       console.error("Engine DJ scan failed", error);
       setEngineScan({ state: "error", message: error?.message || "Could not read Engine DJ drive", detail: "Select the drive root or Engine Library folder", progress: 0 });
       showToast(error?.message || "Could not read Engine DJ drive", "warn");
@@ -715,6 +764,21 @@ function PlaylistModal({
     importEngineDrive(event.target.files);
     event.target.value = "";
   };
+  const modernEnginePicker = typeof window.showDirectoryPicker === "function" && !!engineDJ?.chooseAndScan;
+  const engineDriveControl = (className = "pl-action") => modernEnginePicker ? (
+    <button type="button" className={`${className} engine-action ${engineBusy ? "scanning" : ""}`}
+      disabled={engineBusy}
+      title="Select the drive root or its Engine Library folder"
+      onClick={() => importEngineDrive()}>
+      {engineBusy ? `${Math.round((engineScan.progress || 0) * 100)}% · ENGINE DJ` : "ENGINE DJ DRIVE"}
+    </button>
+  ) : (
+    <label className={`${className} engine-action ${engineBusy ? "scanning" : ""}`}
+      title="Select the Engine Library folder for the fastest import">
+      {engineBusy ? `${Math.round((engineScan.progress || 0) * 100)}% · ENGINE DJ` : "ENGINE DJ DRIVE"}
+      <input type="file" className="hidden" multiple webkitdirectory="" directory="" disabled={engineBusy} onChange={onEngineDriveInput} />
+    </label>
+  );
 
   const loadEnginePlaylist = async (playlist, options = {}) => {
     if (!playlist?.files?.length || !engDeck) {
@@ -1029,10 +1093,7 @@ function PlaylistModal({
                   REKORDBOX XML
                   <input type="file" className="hidden" accept=".xml,text/xml,application/xml" multiple onChange={onRekordboxInput} />
                 </label>
-                <label className={`pl-action engine-action ${engineBusy ? "scanning" : ""}`} title="Read playlists, artwork and stems from an Engine DJ drive">
-                  {engineBusy ? `${Math.round((engineScan.progress || 0) * 100)}% · ENGINE DJ` : "ENGINE DJ DRIVE"}
-                  <input type="file" className="hidden" multiple webkitdirectory="" directory="" onChange={onEngineDriveInput} />
-                </label>
+                {engineDriveControl()}
                 <button className="pl-action danger" onClick={onClear} disabled={files.length === 0}>CLEAR</button>
                 <span className="pl-footer-hint">Drop audio files · 2× click row to load · ESC closes</span>
               </div>
@@ -1047,10 +1108,7 @@ function PlaylistModal({
                   IMPORT XMLS
                   <input type="file" className="hidden" accept=".xml,text/xml,application/xml" multiple onChange={onRekordboxInput} />
                 </label>
-                <label className={`pl-action engine-action ${engineBusy ? "scanning" : ""}`}>
-                  {engineBusy ? `${Math.round((engineScan.progress || 0) * 100)}% · ENGINE DJ` : "ENGINE DJ DRIVE"}
-                  <input type="file" className="hidden" multiple webkitdirectory="" directory="" onChange={onEngineDriveInput} />
-                </label>
+                {engineDriveControl()}
               </div>
               {engineStatus}
               {libraryPlaylists.length === 0 ? (
@@ -1067,23 +1125,27 @@ function PlaylistModal({
                         const folderPlaylist = node.playlist;
                         const folderId = folderPlaylist?.id || folderPlaylist?.path || null;
                         const folderActive = folderId != null && folderId === selectedLibraryId;
+                        const collapsed = libraryCollapsed.has(node.path);
                         return (
-                          <button key={`folder:${node.path}`} className={`engine-browser-folder ${folderActive ? "active" : ""}`}
-                            aria-pressed={folderId != null ? folderActive : undefined}
-                            style={{ paddingLeft: `${9 + depth * 14}px` }}
-                            onClick={() => {
-                              if (folderId != null) setSelectedLibraryId(folderId);
-                              setLibraryCollapsed((current) => {
-                                const next = new Set(current);
-                                if (next.has(node.path)) next.delete(node.path); else next.add(node.path);
-                                return next;
-                              });
-                            }}>
-                            <span className="pl-library-caret">{libraryCollapsed.has(node.path) ? "▸" : "▾"}</span>
-                            <span className="engine-browser-icon">▰</span>
-                            <strong>{node.name}</strong>
-                            <small>{node.children.size}</small>
-                          </button>
+                          <div key={`folder:${node.path}`} className={`engine-browser-folder ${folderActive ? "active" : ""}`}
+                            style={{ paddingLeft: `${depth * 14}px` }}>
+                            <button type="button" className="engine-browser-folder-toggle"
+                              aria-expanded={!collapsed}
+                              aria-label={`${collapsed ? "Expand" : "Collapse"} ${node.name} folder`}
+                              onClick={() => toggleLibraryFolder(node.path)}>
+                              <span className="pl-library-caret">{collapsed ? "▸" : "▾"}</span>
+                              <span className="engine-browser-icon">▰</span>
+                              <strong>{node.name}</strong>
+                              <small>{node.children.size}</small>
+                            </button>
+                            {folderId != null && (
+                              <button type="button" className="engine-browser-folder-open"
+                                aria-pressed={folderActive}
+                                aria-label={`View ${node.name} playlist`}
+                                title="View aggregate playlist"
+                                onClick={() => setSelectedLibraryId(folderId)}>VIEW</button>
+                            )}
+                          </div>
                         );
                       })() : (() => {
                         const playlist = node.playlist;
@@ -1110,25 +1172,14 @@ function PlaylistModal({
                   <section className="engine-browser-detail" aria-label="Selected playlist tracks">
                     {selectedLibraryPlaylist ? (() => {
                       const playlist = selectedLibraryPlaylist;
-                      const liveFiles = playlist.files || [];
-                      const catalogueTracks = playlist.trackRefs?.length ? playlist.trackRefs : (playlist.tracks || []);
-                      const previewTracks = liveFiles.length
-                        ? liveFiles.map((file, index) => ({ file, index, info: { ...(file.engineDJ || {}) } }))
-                        : catalogueTracks.map((track, index) => ({
-                          file: null,
-                          index,
-                          info: track && typeof track === "object"
-                            ? track
-                            : { name: String(track || ""), title: String(track || "") },
-                        }));
-                      const query = libraryTrackFilter.trim().toLowerCase();
-                      const visibleTracks = sortLibraryTracks(previewTracks.filter(({ file, info }) => !query || (
-                        `${info.title || file?.name || info.name || ""} ${info.artist || ""} ${info.album || ""} ${info.genre || ""}`.toLowerCase().includes(query)
-                      )), libraryTrackSort);
+                      const { liveFiles, previewTracks, visibleTracks, stemCount } = selectedLibraryView;
+                      const pageCount = Math.max(1, Math.ceil(visibleTracks.length / LIBRARY_TRACK_PAGE_SIZE));
+                      const page = Math.min(libraryTrackPage, pageCount - 1);
+                      const pageStart = page * LIBRARY_TRACK_PAGE_SIZE;
+                      const renderedTracks = visibleTracks.slice(pageStart, pageStart + LIBRARY_TRACK_PAGE_SIZE);
                       const loadedHere = liveFiles.length === engDeck?.playlist?.length
                         && liveFiles.length > 0
                         && liveFiles.every((file, index) => file === engDeck.playlist[index]);
-                      const stemCount = previewTracks.filter(({ info }) => info.hasStems).length;
                       return (
                         <React.Fragment>
                           <div className="engine-browser-detail-head">
@@ -1169,7 +1220,7 @@ function PlaylistModal({
                               <span></span>
                             </div>
                             <div className="engine-track-scroll">
-                              {visibleTracks.length ? visibleTracks.map(({ file, index, info }) => {
+                              {renderedTracks.length ? renderedTracks.map(({ file, index, info }) => {
                                 const title = info.title || file?.name || info.name || `Track ${index + 1}`;
                                 const isCurrent = loadedHere && index === engDeck.playlistIdx;
                                 return (
@@ -1200,6 +1251,15 @@ function PlaylistModal({
                                 </div>
                               )}
                             </div>
+                            {visibleTracks.length > LIBRARY_TRACK_PAGE_SIZE && (
+                              <div className="engine-track-pagination" aria-label="Track pages">
+                                <button type="button" disabled={page === 0}
+                                  onClick={() => setLibraryTrackPage((current) => Math.max(0, current - 1))}>← PREV</button>
+                                <span>{page + 1} / {pageCount} · {pageStart + 1}–{Math.min(pageStart + LIBRARY_TRACK_PAGE_SIZE, visibleTracks.length)} OF {visibleTracks.length}</span>
+                                <button type="button" disabled={page >= pageCount - 1}
+                                  onClick={() => setLibraryTrackPage((current) => Math.min(pageCount - 1, current + 1))}>NEXT →</button>
+                              </div>
+                            )}
                           </div>
                           {playlist.source === "engine-dj" && !liveFiles.length && (
                             <div className="engine-browser-offline">Reconnect the Engine DJ drive to load audio. Playlist structure remains available offline.</div>

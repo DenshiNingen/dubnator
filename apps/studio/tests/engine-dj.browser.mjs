@@ -15,6 +15,13 @@ try {
   await page.addInitScript(({ forceFallback, forceSqlAsm }) => {
     globalThis.__DUBNATOR_FORCE_STEM_FALLBACK = forceFallback;
     globalThis.__DUBNATOR_FORCE_SQL_ASM = forceSqlAsm;
+    // This integration supplies a real directory through Playwright's file
+    // input. Keep exercising that compatibility path even when Chromium
+    // exposes the newer directory-handle picker used by the live app.
+    Object.defineProperty(globalThis, "showDirectoryPicker", {
+      configurable: true,
+      value: undefined,
+    });
     Object.defineProperty(globalThis, "DubnatorLaunchpad", {
       configurable: true,
       set(api) {

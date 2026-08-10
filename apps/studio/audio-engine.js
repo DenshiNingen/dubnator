@@ -1829,8 +1829,13 @@
         const s = await md.getUserMedia({ audio: true });
         s.getTracks().forEach((t) => t.stop());
         this._devicePermGranted = true;
+        this._devicePermissionError = null;
         return true;
-      } catch (_) { return false; }
+      } catch (error) {
+        this._devicePermissionError = error;
+        console.error("Audio-device permission probe failed", error);
+        return false;
+      }
     }
     // Open the browser's dedicated speaker picker when available. Unlike
     // enumerateDevices(), selectAudioOutput() can grant one output without
@@ -1848,6 +1853,7 @@
       }
       const granted = await this.ensureOutputPermission();
       if (!granted) {
+        if (this._devicePermissionError) throw this._devicePermissionError;
         throw new Error("Audio-device permission is blocked. Reset this site's microphone permission, then try again.");
       }
       return null;
