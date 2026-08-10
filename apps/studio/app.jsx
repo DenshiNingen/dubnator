@@ -2967,7 +2967,7 @@ function App() {
       <div className="brand-strip">
         <div className="brand-mark">
           <span className="word">DUBNATOR</span>
-          <span className="ver mono">MK-1 / v0.3.0</span>
+          <span className="ver mono">MK-1 / v0.4.0</span>
           <span className="tag">DUB FX RACK · CHANNEL STRIP · LIVE</span>
         </div>
         <div className="brand-meta">
