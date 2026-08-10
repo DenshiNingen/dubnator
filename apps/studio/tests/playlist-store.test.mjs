@@ -23,3 +23,8 @@ test("playlist store keeps audio files in a versioned IndexedDB object store", (
   assert.match(source, /new File\(\[record\.blob\]/);
   assert.match(source, /objectStore\(STORE\)\.clear\(\)/);
 });
+
+test("playlist store never copies Engine DJ audio from removable media", () => {
+  assert.match(source, /file\?\.engineDJ\?\.source === "engine-dj"/);
+  assert.match(source, /return transaction\(deck, "readwrite", \(store, key\) => store\.delete\(key\)\)/);
+});

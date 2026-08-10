@@ -43,6 +43,34 @@ function sortLibraryTracks(tracks, sort) {
   });
 }
 
+function EngineArtwork({ file, info }) {
+  const elementRef = useRef(null);
+  const [url, setUrl] = useState(info?.artworkUrl || null);
+  useEffect(() => {
+    setUrl(info?.artworkUrl || null);
+    if (!file || info?.artworkUrl || !file.engineDJ?.artworkFile || !engineDJ?.ensureArtwork) return undefined;
+    let cancelled = false;
+    let observer = null;
+    const load = () => engineDJ.ensureArtwork(file)
+      .then((nextUrl) => { if (!cancelled && nextUrl) setUrl(nextUrl); })
+      .catch(() => {});
+    if (typeof IntersectionObserver === "function" && elementRef.current) {
+      observer = new IntersectionObserver((entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        observer.disconnect();
+        load();
+      }, { rootMargin: "120px" });
+      observer.observe(elementRef.current);
+    } else load();
+    return () => { cancelled = true; observer?.disconnect(); };
+  }, [file, info?.artworkUrl]);
+  return (
+    <span ref={elementRef} className={`c-art ${url ? "has-artwork" : ""}`}>
+      {url ? <img src={url} alt="" draggable="false" /> : <span aria-hidden="true">♪</span>}
+    </span>
+  );
+}
+
 // === Saved-playlist storage (localStorage) ===
 // We persist only filenames + order. Audio data isn't saved (browser security).
 // On load, user re-picks the audio files from disk; we match by name.
@@ -133,7 +161,9 @@ function PlaylistModal({
   const [reconcile, setReconcile] = useState(null);
   const [rekordboxImport, setRekordboxImport] = useState(null);
   const [engineScan, setEngineScan] = useState(null);
-  const engineBusy = engineScan?.state === "scanning" || engineScan?.state === "loading";
+  const engineBusy = engineScan?.state === "picking" || engineScan?.state === "scanning" || engineScan?.state === "loading";
+  const engineRequestRef = useRef(0);
+  const engineFallbackInputRef = useRef(null);
   const [toast, setToast] = useState(null); // {msg, kind}
   const toastTimer = useRef(null);
   const showToast = (msg, kind = "info") => {
@@ -189,7 +219,7 @@ function PlaylistModal({
         });
       });
       const metaKey = trackKey(file);
-      if (!cancelled && metadata[metaKey] == null && trackMetadata?.get) {
+      if (!cancelled && !file.engineDJ && metadata[metaKey] == null && trackMetadata?.get) {
         try {
           const info = await trackMetadata.get(file);
           if (!cancelled) setMetadata((current) => current[metaKey] != null ? current : { ...current, [metaKey]: info || {} });
@@ -716,7 +746,10 @@ function PlaylistModal({
 
   const importEngineDrive = async (filesInput = null) => {
     if (!engineDJ?.scanFiles) return;
-    setEngineScan({ state: "scanning", message: "Opening Engine DJ drive", detail: "Preparing file index", progress: 0.02 });
+    const requestId = ++engineRequestRef.current;
+    setEngineScan(filesInput
+      ? { state: "scanning", message: "Opening Engine DJ drive", detail: "Preparing file index", progress: 0.02 }
+      : { state: "picking", message: "Waiting for folder dialog", detail: "If Arc does not open it, use the Engine Library folder picker", progress: 0.02 });
     try {
       const options = {
         onProgress: ({ message, detail, progress }) => setEngineScan({
@@ -729,6 +762,16 @@ function PlaylistModal({
       const result = filesInput
         ? await engineDJ.scanFiles(filesInput, options)
         : await engineDJ.chooseAndScan(options);
+      if (requestId !== engineRequestRef.current) {
+        engineDJ.releasePlaylists?.(result.playlists);
+        return;
+      }
+      // A rescan replaces the connected Engine catalogue. Release artwork URLs
+      // from the previous scan, except those still displayed by a loaded deck.
+      engineDJ.releasePlaylists?.(
+        libraryPlaylists.filter((playlist) => playlist.source === "engine-dj"),
+        [...(eng.deckA?.playlist || []), ...(eng.deckB?.playlist || [])],
+      );
       const merged = [
         ...libraryPlaylists.filter((playlist) => playlist.source !== "engine-dj"),
         ...result.playlists,
@@ -751,6 +794,7 @@ function PlaylistModal({
       setView("library");
       showToast(`Engine DJ ready · ${result.playlists.length} playlists · ${result.stemCount} stems`, "ok");
     } catch (error) {
+      if (requestId !== engineRequestRef.current) return;
       if (error?.name === "AbortError") {
         setEngineScan(null);
         return;
@@ -764,14 +808,22 @@ function PlaylistModal({
     importEngineDrive(event.target.files);
     event.target.value = "";
   };
+  const openEngineFolderFallback = () => {
+    engineRequestRef.current += 1;
+    setEngineScan(null);
+    engineFallbackInputRef.current?.click();
+  };
   const modernEnginePicker = typeof window.showDirectoryPicker === "function" && !!engineDJ?.chooseAndScan;
   const engineDriveControl = (className = "pl-action") => modernEnginePicker ? (
-    <button type="button" className={`${className} engine-action ${engineBusy ? "scanning" : ""}`}
-      disabled={engineBusy}
-      title="Select the drive root or its Engine Library folder"
-      onClick={() => importEngineDrive()}>
-      {engineBusy ? `${Math.round((engineScan.progress || 0) * 100)}% · ENGINE DJ` : "ENGINE DJ DRIVE"}
-    </button>
+    <React.Fragment>
+      <button type="button" className={`${className} engine-action ${engineBusy ? "scanning" : ""}`}
+        disabled={engineBusy}
+        title="Select the drive root or its Engine Library folder"
+        onClick={() => importEngineDrive()}>
+        {engineBusy ? `${Math.round((engineScan.progress || 0) * 100)}% · ENGINE DJ` : "ENGINE DJ DRIVE"}
+      </button>
+      <input ref={engineFallbackInputRef} type="file" className="hidden" multiple webkitdirectory="" directory="" onChange={onEngineDriveInput} />
+    </React.Fragment>
   ) : (
     <label className={`${className} engine-action ${engineBusy ? "scanning" : ""}`}
       title="Select the Engine Library folder for the fastest import">
@@ -797,6 +849,7 @@ function PlaylistModal({
       const targetFile = playlist.files[targetIndex];
       setEngineScan({ state: "loading", message: `Loading ${playlist.name}`, detail: targetFile?.engineDJ?.hasStems ? "Decoding selected track and stems" : "Decoding selected track", progress: 0.58 });
       await new Promise((resolve) => setTimeout(resolve, 0));
+      await engineDJ.ensureArtwork?.(targetFile).catch(() => null);
       await engDeck.loadPlaylistIndex(targetIndex);
       if (shouldPlay) engDeck.play();
       setState((current) => ({
@@ -921,6 +974,11 @@ function PlaylistModal({
           <span style={{ width: `${Math.max(2, (engineScan.progress || 0) * 100)}%` }}></span>
         </div>
       )}
+      {engineScan?.state === "picking" && (
+        <button type="button" className="pl-mini engine-picker-fallback" onClick={openEngineFolderFallback}>
+          USE ENGINE LIBRARY FOLDER
+        </button>
+      )}
     </div>
   );
 
@@ -1026,11 +1084,7 @@ function PlaylistModal({
                           : isCur ? <span className="pl-cued">●</span>
                           : <span className="pl-idle"></span>}
                       </span>
-                      <span className={`c-art ${info.artworkUrl ? "has-artwork" : ""}`}>
-                        {info.artworkUrl
-                          ? <img src={info.artworkUrl} alt="" draggable="false" />
-                          : <span aria-hidden="true">♪</span>}
-                      </span>
+                      <EngineArtwork file={file} info={info} />
                       <span className="c-name" title={file.name}>
                         <b>{info.title || file.name}</b>
                         {(info.artist || info.album) && (
@@ -1227,9 +1281,7 @@ function PlaylistModal({
                                   <div key={`${trackKey(file) || title}:${index}`} className={`engine-track-row ${isCurrent ? "current" : ""}`}
                                     onDoubleClick={() => liveFiles.length && loadEnginePlaylist(playlist, { index, stayInLibrary: true })}>
                                     <span className="engine-track-number">{String(index + 1).padStart(2, "0")}</span>
-                                    <span className={`c-art ${info.artworkUrl ? "has-artwork" : ""}`}>
-                                      {info.artworkUrl ? <img src={info.artworkUrl} alt="" draggable="false" /> : <span aria-hidden="true">♪</span>}
-                                    </span>
+                                    <EngineArtwork file={file} info={info} />
                                     <span className="engine-track-name" title={title}>
                                       <b>{title}</b>
                                       <small>{[info.artist, info.album].filter(Boolean).join(" · ") || file?.name || "Unknown artist"}</small>

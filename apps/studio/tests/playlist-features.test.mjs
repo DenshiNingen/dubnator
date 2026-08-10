@@ -4,12 +4,13 @@ import test from "node:test";
 import vm from "node:vm";
 
 const root = new URL("../", import.meta.url);
-const [app, playlist, metadata, rekordbox, engineDJ, css] = await Promise.all([
+const [app, playlist, metadata, rekordbox, engineDJ, audioEngine, css] = await Promise.all([
   readFile(new URL("app.jsx", root), "utf8"),
   readFile(new URL("playlist-modal.jsx", root), "utf8"),
   readFile(new URL("track-metadata.js", root), "utf8"),
   readFile(new URL("rekordbox.js", root), "utf8"),
   readFile(new URL("engine-dj.js", root), "utf8"),
+  readFile(new URL("audio-engine.js", root), "utf8"),
   readFile(new URL("styles.css", root), "utf8"),
 ]);
 
@@ -28,7 +29,7 @@ test("artwork is visible in compact, overview, expanded and playlist views", () 
   assert.match(app, /className="deck-strip-art"/);
   assert.match(app, /className="td-art"/);
   assert.match(app, /className="deck-focus-cover"/);
-  assert.match(playlist, /info\.artworkUrl/);
+  assert.match(playlist, /info\?\.artworkUrl/);
   assert.match(css, /\.c-art img/);
 });
 
@@ -93,9 +94,13 @@ test("Engine drive picker skips unrelated files when the drive root is selected"
   vm.runInContext(engineDJ, sandbox, { filename: "engine-dj.js" });
 
   let unrelatedVisited = false;
+  let databaseReads = 0;
   const database = {
     kind: "file",
-    getFile: async () => ({ name: "m.db", size: 1, lastModified: 0 }),
+    getFile: async () => {
+      databaseReads += 1;
+      return { name: "m.db", size: 1, lastModified: 0, arrayBuffer: async () => new ArrayBuffer(1) };
+    },
   };
   const databaseDirectory = {
     kind: "directory",
@@ -129,8 +134,37 @@ test("Engine drive picker skips unrelated files when the drive root is selected"
   assert.equal(unrelatedVisited, false);
   assert.equal(files.length, 1);
   assert.equal(files[0].relativePath, "Engine Library/Database2/m.db");
+  assert.equal(databaseReads, 0, "directory scan must retain a handle without opening the file");
+  await files[0].arrayBuffer();
+  assert.equal(databaseReads, 1, "the file opens only when its contents are requested");
   assert.match(playlist, /engineDJ\.chooseAndScan\(options\)/);
   assert.match(playlist, /typeof window\.showDirectoryPicker === "function"/);
+});
+
+test("Engine rescans deduplicate and release artwork resources safely", () => {
+  assert.match(engineDJ, /const metadataByFile = new Map\(\)/);
+  assert.match(engineDJ, /const artworkUrlByFile = new Map\(\)/);
+  assert.match(engineDJ, /function releasePlaylists\(playlists, preserveFiles = \[\]\)/);
+  assert.match(engineDJ, /URL\.revokeObjectURL\(url\)/);
+  assert.match(playlist, /engineDJ\.releasePlaylists\?\.\(/);
+});
+
+test("modern Engine scans keep lazy handles instead of open SSD files", () => {
+  assert.match(engineDJ, /function fileReference\(handle, path/);
+  assert.match(engineDJ, /const file = await handle\.getFile\(\)/);
+  assert.match(engineDJ, /files\.push\(fileReference\(child, path, name\)\)/);
+  assert.match(engineDJ, /async function ensureArtwork\(file\)/);
+  assert.match(playlist, /function EngineArtwork\(\{ file, info \}\)/);
+  assert.match(playlist, /!file\.engineDJ && metadata\[metaKey\]/);
+  assert.match(audioEngine, /!engineMetadata && metadataReader\?\.get/);
+});
+
+test("a stalled modern picker exposes a user-gesture folder fallback", () => {
+  assert.match(playlist, /state: "picking", message: "Waiting for folder dialog"/);
+  assert.match(playlist, /const engineRequestRef = useRef\(0\)/);
+  assert.match(playlist, /requestId !== engineRequestRef\.current/);
+  assert.match(playlist, /engineFallbackInputRef\.current\?\.click\(\)/);
+  assert.match(playlist, /USE ENGINE LIBRARY FOLDER/);
 });
 
 test("playlist library tracks can be sorted without changing their load index", () => {

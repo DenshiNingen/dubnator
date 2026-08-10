@@ -38,6 +38,16 @@
 
   function save(deck, files) {
     const list = Array.from(files || []).filter(Boolean);
+    // Engine DJ files point at removable media and can represent an entire
+    // multi-terabyte collection. Structured-cloning them would copy the audio
+    // into IndexedDB, keep the SSD busy long after the scan, and make a later
+    // reload look frozen. The lightweight Engine catalogue is persisted by
+    // library-store.js; audio is reconnected explicitly from the drive.
+    if (list.some((file) => file?.engineDJ?.source === "engine-dj")) {
+      if (pendingSaves.has(deck)) clearTimeout(pendingSaves.get(deck).timer);
+      pendingSaves.delete(deck);
+      return transaction(deck, "readwrite", (store, key) => store.delete(key));
+    }
     // Safari/WebKit can restore a structured-cloned File as a Blob (losing its
     // name). Store a tiny envelope so reloads always reconstruct usable Files.
     const records = list.map((file) => ({

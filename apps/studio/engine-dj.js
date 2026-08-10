@@ -13,6 +13,7 @@
   // official Engine order: vocals, melody, bass, drums.
   const STEM_PAIR_ORDER = [0, 3, 1, 2];
   const CONTAINERS = new Set(["moov", "trak", "mdia", "minf", "stbl", "dinf", "edts", "udta", "ilst", "moof", "traf", "mfra", "mvex"]);
+  const lazyArtworkUrls = new WeakMap();
 
   const u32 = (data, offset) => new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(offset, false);
   const u64 = (data, offset) => Number(new DataView(data.buffer, data.byteOffset, data.byteLength).getBigUint64(offset, false));
@@ -268,6 +269,45 @@
     return file;
   }
 
+  function fileType(name) {
+    const extension = String(name || "").split(".").pop().toLowerCase();
+    return ({
+      aac: "audio/aac", aif: "audio/aiff", aiff: "audio/aiff", flac: "audio/flac",
+      jpg: "image/jpeg", jpeg: "image/jpeg", m4a: "audio/mp4", mp3: "audio/mpeg",
+      ogg: "audio/ogg", opus: "audio/opus", png: "image/png", wav: "audio/wav",
+    })[extension] || "application/octet-stream";
+  }
+
+  // FileSystemFileHandle.getFile() keeps the underlying removable-media file
+  // open for as long as the returned File remains reachable. A large Engine
+  // library therefore must retain handles, not hundreds of live File objects.
+  // This small File-like facade materialises a File only for the duration of a
+  // requested read, so decks can still use arrayBuffer()/slice() unchanged.
+  function fileReference(handle, path, name = handle?.name) {
+    const reference = {
+      name: name || "file",
+      type: fileType(name),
+      size: 0,
+      lastModified: 0,
+      relativePath: path,
+      webkitRelativePath: path,
+      async arrayBuffer() {
+        const file = await handle.getFile();
+        return file.arrayBuffer();
+      },
+      slice(start, end, type) {
+        return {
+          arrayBuffer: async () => {
+            const file = await handle.getFile();
+            return file.slice(start, end, type).arrayBuffer();
+          },
+        };
+      },
+    };
+    try { Object.defineProperty(reference, "engineFileHandle", { value: handle }); } catch (_) {}
+    return reference;
+  }
+
   const nextPaint = () => new Promise((resolve) => setTimeout(resolve, 0));
   const assetUrl = (path) => typeof document === "undefined"
     ? path
@@ -347,6 +387,10 @@
       const playlistPaths = rows(db, "SELECT id, path, position FROM PlaylistPath");
       const artwork = rows(db, "SELECT id, hex(hash) AS hashHex FROM AlbumArt");
       const artworkById = new Map(artwork.map((item) => [Number(item.id), base64UrlFromHex(item.hashHex)]));
+      // A track can occur in many Engine playlists. Reuse its metadata and one
+      // object URL instead of allocating a new artwork URL for every occurrence.
+      const metadataByFile = new Map();
+      const artworkUrlByFile = new Map();
       const trackByOrigin = new Map(tracks.map((track) => [`${track.originTrackId}:${track.originDatabaseUuid}`, track]));
       const trackById = new Map(tracks.map((track) => [Number(track.id), track]));
       const pathByPlaylist = new Map(playlistPaths.map((entry) => [Number(entry.id), entry]));
@@ -402,7 +446,13 @@
           const stemFile = fileMap.get(`engine library/stems/${stemName}`.toLowerCase()) || null;
           const artHash = artworkById.get(Number(track.albumArtId));
           const artworkFile = artHash ? fileMap.get(`engine library/artwork/${artHash}.jpg`.toLowerCase()) || null : null;
-          return attachEngineMetadata(audioFile, {
+          if (metadataByFile.has(audioFile)) return audioFile;
+          let artworkUrl = null;
+          if (artworkFile && typeof Blob === "function" && artworkFile instanceof Blob) {
+            artworkUrl = artworkUrlByFile.get(artworkFile) || URL.createObjectURL(artworkFile);
+            artworkUrlByFile.set(artworkFile, artworkUrl);
+          }
+          metadataByFile.set(audioFile, attachEngineMetadata(audioFile, {
             source: "engine-dj",
             trackId: Number(track.id),
             originTrackId: Number(track.originTrackId),
@@ -416,8 +466,9 @@
             hasStems: !!stemFile,
             stemFile,
             artworkFile,
-            artworkUrl: artworkFile ? URL.createObjectURL(artworkFile) : null,
-          });
+            artworkUrl,
+          }).engineDJ);
+          return audioFile;
         }).filter(Boolean);
         catalogue.push({
           id: `engine:${playlist.id}`,
@@ -467,9 +518,7 @@
         const path = prefix ? `${prefix}/${name}` : name;
         if (child.kind === "directory") await visit(child, path);
         else {
-          const file = await child.getFile();
-          try { Object.defineProperty(file, "relativePath", { value: path }); } catch (_) {}
-          files.push(file);
+          files.push(fileReference(child, path, name));
           if (files.length % 40 === 0) {
             reportProgress(options, "Reading drive directory", Math.min(0.18, 0.02 + files.length / 12000), `${files.length} files found`);
             await nextPaint();
@@ -508,6 +557,40 @@
     return scanFiles(await filesFromDirectoryHandle(handle, options), options);
   }
 
+  async function ensureArtwork(file) {
+    const metadata = file?.engineDJ;
+    if (!metadata || metadata.artworkUrl || !metadata.artworkFile) return metadata?.artworkUrl || null;
+    const source = metadata.artworkFile;
+    let pending = lazyArtworkUrls.get(source);
+    if (!pending) {
+      pending = source.arrayBuffer().then((bytes) => {
+        // The URL owns an in-memory Blob, never the File returned by the external
+        // drive, so displaying artwork cannot keep that volume mounted.
+        const blob = new Blob([bytes], { type: source.type || "image/jpeg" });
+        return URL.createObjectURL(blob);
+      });
+      lazyArtworkUrls.set(source, pending);
+    }
+    metadata.artworkUrl = await pending;
+    return metadata.artworkUrl;
+  }
+
+  function releasePlaylists(playlists, preserveFiles = []) {
+    const preservedUrls = new Set(Array.from(preserveFiles || [])
+      .map((file) => file?.engineDJ?.artworkUrl)
+      .filter(Boolean));
+    const releasedUrls = new Set();
+    Array.from(playlists || []).forEach((playlist) => {
+      Array.from(playlist?.files || []).forEach((file) => {
+        const url = file?.engineDJ?.artworkUrl;
+        if (!url || preservedUrls.has(url) || releasedUrls.has(url)) return;
+        try { URL.revokeObjectURL(url); } catch (_) {}
+        releasedUrls.add(url);
+      });
+    });
+    return releasedUrls.size;
+  }
+
   window.DubnatorEngineDJ = {
     STEM_NAMES,
     STEM_PAIR_ORDER,
@@ -516,6 +599,8 @@
     scanFiles,
     chooseAndScan,
     filesFromDirectoryHandle,
+    ensureArtwork,
+    releasePlaylists,
     _test: { walkBoxes, sampleRanges, rows, base64UrlFromHex },
   };
 })();

@@ -384,7 +384,7 @@
         source: "engine-dj",
       } : {};
       const metadataReader = window.DubnatorTrackMetadata;
-      if (metadataReader?.get) {
+      if (!engineMetadata && metadataReader?.get) {
         metadataReader.get(file).then((metadata) => {
           if (this.file === file) this.metadata = { ...(metadata || {}), ...this.metadata };
         }).catch(() => {});

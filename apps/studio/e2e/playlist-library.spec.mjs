@@ -172,6 +172,11 @@ test("large Engine folders collapse without selecting or mounting every track", 
   await expect(page.locator(".engine-browser-title")).toContainText("ByArtistsss");
   await expect(page.locator(".engine-track-row")).toHaveCount(200);
   await expect(page.locator(".engine-track-pagination")).toContainText("1 / 25");
+
+  await page.getByRole("button", { name: "Close playlist" }).click();
+  await page.keyboard.press("Space");
+  await expect(page.locator(".engine-browser-title")).toContainText("ByArtistsss");
+  await expect(page.locator(".engine-track-row")).toHaveCount(200);
 });
 
 test("restores a local deck playlist after a reload", async ({ page }, testInfo) => {
@@ -191,6 +196,27 @@ test("restores a local deck playlist after a reload", async ({ page }, testInfo)
   await page.keyboard.press("Space");
   await expect(page.locator(".playlist-modal")).toBeVisible();
   await expect(page.locator(".pl-row .c-name b")).toHaveText("Persisted Dub");
+});
+
+test("a stalled modern Engine picker offers a clickable folder fallback", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-wide", "one picker fallback pass is sufficient");
+  await page.addInitScript(() => {
+    Object.defineProperty(globalThis, "showDirectoryPicker", {
+      configurable: true,
+      value: () => new Promise(() => {}),
+    });
+  });
+  await page.goto("/");
+  await page.locator("body").click({ position: { x: 20, y: 20 } });
+  await page.keyboard.press("Space");
+  await page.getByRole("button", { name: "ENGINE DJ DRIVE" }).click();
+  const fallback = page.getByRole("button", { name: "USE ENGINE LIBRARY FOLDER" });
+  await expect(fallback).toBeVisible();
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    fallback.click(),
+  ]);
+  expect(chooser.isMultiple()).toBe(true);
 });
 
 test("playlist master-detail browser stacks cleanly on compact screens", async ({ page }, testInfo) => {
