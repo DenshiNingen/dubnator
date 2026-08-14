@@ -824,6 +824,10 @@ function App() {
   const [echoThrowHeld, setEchoThrowHeld] = useState(false);
   const echoThrowRestoreRef = useRef(null);
 
+  // === dub drive ===
+  const [drive, setDrive] = useState({ on: false, amount: 0.55, tone: 6500, mix: 0.35, safe: 110, safeOn: true, mode: "warm" });
+  const [driveBurnHeld, setDriveBurnHeld] = useState(false);
+
   // === dub filter ===
   const [dubFilter, setDubFilter] = useState({ mode: "lp", cutoff: 1000, q: 1.0, route: "music", on: false, sweep: 0, sweepRate: 0.5 });
 
@@ -1093,6 +1097,17 @@ function App() {
     if (eng.setEchoWow) eng.setEchoWow(echo.wow);
     if (eng.setEchoRobotic) eng.setEchoRobotic(echo.robotic);
   }, [echo, audibleEchoTime, musicSends, ready]);
+
+  useEffect(() => {
+    if (!ready || !eng.setDriveAmount) return;
+    // BURN is a performance override: it punches the wet branch in hard while
+    // held, then returns precisely to the user's previous settings on release.
+    eng.setDriveAmount(driveBurnHeld ? Math.max(0.88, drive.amount) : drive.amount);
+    eng.setDriveTone(drive.tone);
+    eng.setDriveBassSafe(drive.safeOn, drive.safe);
+    eng.setDriveMode(drive.mode);
+    eng.setDriveReturn(driveBurnHeld ? Math.max(0.48, drive.mix) : drive.on ? drive.mix : 0);
+  }, [drive, driveBurnHeld, ready]);
 
   useEffect(() => {
     if (!ready) return;
@@ -1398,8 +1413,8 @@ function App() {
   // === Global presets — capture/restore the full console state ===
   const PRESET_KEY = "dubnator.preset.autoload.v1";
   const buildPreset = () => ({
-    version: 3,
-    geqA, geqB, paramA, kills, reverb, echo, master, dubFilter, sampleFx,
+    version: 4,
+    geqA, geqB, paramA, kills, reverb, echo, drive, master, dubFilter, sampleFx,
     sampleSlotBypass, siren, crossfade, crossfadeCurve, musicSends, auxSends, auxLevels, revLim, echoLim,
     advanced, eqSelect, rewindStop, deckEndMode, displayMode, specMode, specSource, logoAlpha, flatGain, killTrims, killQ, killFreqs, pureSub, view,
     deckA: { gain: deckA.gain, pan: deckA.pan, mute: deckA.mute, autoGain: deckA.autoGain, rewindLen: deckA.rewindLen },
@@ -1416,6 +1431,7 @@ function App() {
     // becoming undefined → NaN.
     if (p.reverb) setReverb((s) => ({ ...s, ...p.reverb }));
     if (p.echo) setEcho((s) => ({ ...s, ...p.echo }));
+    if (p.drive) setDrive((s) => ({ ...s, ...p.drive }));
     // Merge onto current state (not wholesale replace) so a preset saved before
     // a field existed (master.hp, dubFilter.sweep, siren.autoPan, …) keeps its
     // default instead of becoming undefined → NaN/broken knob.
@@ -1587,6 +1603,12 @@ function App() {
       "echo.filterfreq": (v) => setEcho((s) => ({ ...s, filter: Math.round(120 * Math.pow(20000 / 120, v)) })),
       "echo.wow": (v) => setEcho((s) => ({ ...s, wow: v })),
       "echo.robotic": (v) => setEcho((s) => ({ ...s, robotic: v > 0.5 })),
+      "drive.amount": (v) => setDrive((s) => ({ ...s, amount: v })),
+      "drive.tone": (v) => setDrive((s) => ({ ...s, tone: Math.round(900 * Math.pow(20, v)) })),
+      "drive.mix": (v) => setDrive((s) => ({ ...s, mix: v })),
+      "drive.safe": (v) => setDrive((s) => ({ ...s, safe: Math.round(40 * Math.pow(10, v)) })),
+      "drive.on": (v) => setDrive((s) => ({ ...s, on: v > 0.5 })),
+      "drive.burn": (v) => setDriveBurnHeld(v > 0.5),
       "reverb.room": (v) => setReverb((s) => ({ ...s, room: v })),
       "reverb.hfd": (v) => setReverb((s) => ({ ...s, hfd: v })),
       "reverb.predelay": (v) => setReverb((s) => ({ ...s, preDelay: Math.round(v * 200) })),
@@ -1700,6 +1722,10 @@ function App() {
       "echo.div": (v) => setEchoSyncDivision(["1/4", "1/4.", "1/4t", "1/8", "1/8.", "1/8t", "1/16", "1/16t"][Math.min(7, Math.round(v * 7))]),
       "echo.hp": (v) => setEcho((s) => ({ ...s, hpOn: v > 0.5 })),
       "echo.panic": (v) => { if (v > 0.5 && eng.panicFX) eng.panicFX(); },
+      "drive.safeon": (v) => setDrive((s) => ({ ...s, safeOn: v > 0.5 })),
+      "drive.warm": (v) => { if (v > 0.5) setDrive((s) => ({ ...s, mode: "warm" })); },
+      "drive.tape": (v) => { if (v > 0.5) setDrive((s) => ({ ...s, mode: "tape" })); },
+      "drive.rude": (v) => { if (v > 0.5) setDrive((s) => ({ ...s, mode: "rude" })); },
       "dubfilter.hp": (v) => { if (v > 0.5) setDubFilter((s) => ({ ...s, on: true, mode: "hp" })); },
       "dubfilter.lp": (v) => { if (v > 0.5) setDubFilter((s) => ({ ...s, on: true, mode: "lp" })); },
       "dubfilter.route.music": (v) => { if (v > 0.5) setDubFilter((s) => ({ ...s, route: "music", on: true })); },
@@ -1921,6 +1947,11 @@ function App() {
       "echo.sat": clamp(echo.sat), "echo.dw": clamp(echo.dw),
       "echo.filterfreq": clamp(Math.log(echo.filter / 120) / Math.log(20000 / 120)),
       "echo.wow": clamp(echo.wow), "echo.robotic": echo.robotic ? 1 : 0,
+      "drive.amount": clamp(drive.amount),
+      "drive.tone": clamp(Math.log(drive.tone / 900) / Math.log(20)),
+      "drive.mix": clamp(drive.mix),
+      "drive.safe": clamp(Math.log(drive.safe / 40) / Math.log(10)),
+      "drive.on": drive.on ? 1 : 0, "drive.burn": driveBurnHeld ? 1 : 0,
       "reverb.room": clamp(reverb.room), "reverb.hfd": clamp(reverb.hfd),
       "reverb.predelay": clamp(reverb.preDelay / 200), "reverb.mod": clamp(reverb.mod),
       "reverb.freeze": reverb.freeze ? 1 : 0,
@@ -1993,6 +2024,10 @@ function App() {
       "echo.tap": 0, "echo.dub": 0, "echo.throw": echoThrowHeld ? 1 : 0,
       "echo.div": clamp((echo.syncDiv === "1/4" ? 0 : echo.syncDiv === "1/4." ? 1 : echo.syncDiv === "1/4t" ? 2 : echo.syncDiv === "1/8" ? 3 : echo.syncDiv === "1/8." ? 4 : echo.syncDiv === "1/8t" ? 5 : echo.syncDiv === "1/16" ? 6 : 7) / 7),
       "echo.hp": echo.hpOn ? 1 : 0, "echo.panic": 0,
+      "drive.safeon": drive.safeOn ? 1 : 0,
+      "drive.warm": drive.mode === "warm" ? 1 : 0,
+      "drive.tape": drive.mode === "tape" ? 1 : 0,
+      "drive.rude": drive.mode === "rude" ? 1 : 0,
       "dubfilter.hp": dubFilter.on && dubFilter.mode === "hp" ? 1 : 0,
       "dubfilter.lp": dubFilter.on && dubFilter.mode === "lp" ? 1 : 0,
       "dubfilter.route.music": dubFilter.route === "music" ? 1 : 0,
@@ -3947,6 +3982,73 @@ function App() {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+
+        {/* DUB DRIVE — parallel, bass-safe saturation */}
+        <div className={`panel with-screws rack-drive ${drive.on || driveBurnHeld ? "engaged" : ""}`}>
+          <div className="screw-bl"></div><div className="screw-br"></div>
+          <div className="panel-header">
+            <span className="panel-title">Dub Drive</span>
+            <span className="panel-sub fx-status">{driveBurnHeld ? "BURNING" : drive.on ? "LIVE" : "SAFE"}</span>
+          </div>
+          <div className="panel-body col gap-3 dub-drive-body">
+            <div className="row gap-1 drive-mode-row" role="radiogroup" aria-label="Dub Drive character">
+              {["warm", "tape", "rude"].map((mode) => (
+                <button key={mode}
+                  className={`btn-xs btn fx-action ${drive.mode === mode ? "active" : ""}`}
+                  role="radio" aria-checked={drive.mode === mode}
+                  onClick={() => setDrive((s) => ({ ...s, mode }))}>
+                  {mode.toUpperCase()}
+                </button>
+              ))}
+            </div>
+            <div className="dial-bank drive-dials">
+              <Knob size="sm" midiId="drive.amount" label="DRIVE" tone="red"
+                value={drive.amount} min={0} max={1}
+                onChange={(value) => setDrive((s) => ({ ...s, amount: value }))}
+                format={(value) => `${Math.round(value * 100)}%`} />
+              <Knob size="sm" midiId="drive.tone" label="TONE" tone="yellow"
+                value={drive.tone} min={900} max={18000} scale="log"
+                onChange={(value) => setDrive((s) => ({ ...s, tone: Math.round(value) }))}
+                format={(value) => value >= 1000 ? `${(value / 1000).toFixed(1)}k` : `${value.toFixed(0)}Hz`} />
+              <Knob size="sm" midiId="drive.mix" label="RTN" tone="orange"
+                value={drive.mix} min={0} max={1}
+                onChange={(value) => setDrive((s) => ({ ...s, mix: value }))}
+                format={(value) => `${Math.round(value * 100)}%`} />
+              <Knob size="sm" midiId="drive.safe" label="SAFE" tone="cyan"
+                value={drive.safe} min={40} max={400} scale="log"
+                onChange={(value) => setDrive((s) => ({ ...s, safe: Math.round(value) }))}
+                format={(value) => `${value.toFixed(0)}Hz`} />
+            </div>
+            <button className={`btn-xs btn fx-action drive-safe ${drive.safeOn ? "active" : ""}`}
+              onClick={() => setDrive((s) => ({ ...s, safeOn: !s.safeOn }))}
+              title="Keep sub-bass out of the saturated branch">
+              BASS SAFE{drive.safeOn ? " ●" : ""}
+            </button>
+            <div className="row gap-2">
+              <button className={`btn-xs btn fx-action drive-on ${drive.on ? "active" : ""}`}
+                style={{ flex: 1 }} onClick={() => setDrive((s) => ({ ...s, on: !s.on }))}>
+                {drive.on ? "ON ●" : "OFF"}
+              </button>
+              <button className={`btn-xs btn fx-action drive-burn ${driveBurnHeld ? "active" : ""}`}
+                style={{ flex: 1 }}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  event.currentTarget.setPointerCapture?.(event.pointerId);
+                  setDriveBurnHeld(true);
+                }}
+                onPointerUp={(event) => {
+                  event.currentTarget.releasePointerCapture?.(event.pointerId);
+                  setDriveBurnHeld(false);
+                }}
+                onPointerCancel={() => setDriveBurnHeld(false)}
+                onLostPointerCapture={() => setDriveBurnHeld(false)}
+                title="Hold for a heavy parallel saturation throw; release restores the previous mix">
+                BURN
+              </button>
+            </div>
+            <div className="mono drive-hint">PARALLEL · SUB STAYS CLEAN</div>
           </div>
         </div>
 

@@ -113,7 +113,7 @@ function setup() {
 test("dual layout covers the complete performance catalog", () => {
   const manager = new LaunchpadMiniMk3Manager({ catalog });
   const mapped = new Set(manager.allMappedIds());
-  assert.equal(catalog.length, 210);
+  assert.equal(catalog.length, 220);
   assert.equal(catalog.filter((control) => !mapped.has(control.id)).length, 0);
   assert.equal(manager.pages.length, 2);
   assert.ok(manager.pages.every((role) => role.length === 8));
@@ -297,6 +297,10 @@ test("siren uses previous/next navigation and exposes both FX amounts", () => {
     "siren.bits",
     "siren.sr",
     "siren.preset",
+    "drive.amount",
+    "drive.tone",
+    "drive.mix",
+    "drive.safe",
   ]);
   const sirenFxLayout = manager.describePage(0, 6);
   assert.equal(sirenFxLayout.gridButtons.length, 0);

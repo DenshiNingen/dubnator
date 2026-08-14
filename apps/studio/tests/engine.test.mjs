@@ -24,6 +24,7 @@ ok(eng.ready === true, "ready === true after init");
 ok(!!eng.deckA && !!eng.deckB, "two decks created");
 ok(!!eng.reverb && !!eng.echoDelay && !!eng.siren && !!eng.samples, "reverb/echo/siren/samples present");
 ok(!!eng.limiter && !!eng.masterGain, "master chain present");
+ok(!!eng.driveShape && !!eng.driveReturn && eng.driveShape.oversample === "4x", "oversampled Dub Drive branch present");
 ok(eng.deckA.geq.length === 10, "deck A has 10-band GEQ");
 ok(eng.deckA.params.length === 4, "deck A has 4-band parametric");
 
@@ -53,6 +54,31 @@ try {
   eng.setSamplesHP(120); eng.setSirenGain(0.8);
   ok(true, "core setters executed");
 } catch (e) { ok(false, "setters threw: " + e.message); }
+
+section("parallel Dub Drive keeps the sub-safe dry path intact");
+ok(eng.masterSum._conns.includes(eng.masterBus), "dry mix still connects directly to master");
+ok(eng.masterSum._conns.includes(eng.driveInput), "dry mix also feeds the parallel drive branch");
+ok(eng.driveLim._conns.includes(eng.masterBus), "limited drive return rejoins the master");
+ok(eng.driveReturn.gain.value === 0, "drive return starts muted for backward-compatible sessions");
+eng.setDriveAmount(1);
+ok(eng.drivePre.gain.value === 16 && eng.driveTrim.gain.value < 0.3, "full drive adds gain with output compensation");
+eng.setDriveAmount(-1);
+ok(eng.drivePre.gain.value === 1, "drive amount clamps at zero");
+eng.setDriveTone(100);
+ok(eng.driveTone.frequency.value === 900, "drive tone clamps to musical floor");
+eng.setDriveTone(99999);
+ok(eng.driveTone.frequency.value === 18000, "drive tone clamps to ceiling");
+eng.setDriveBassSafe(true, 140);
+ok(eng.driveHP.frequency.value === 140, "bass-safe high-pass protects the sub branch");
+eng.setDriveBassSafe(false, 140);
+ok(eng.driveHP.frequency.value === 20, "bass-safe off parks the filter transparently");
+eng.setDriveMode("rude");
+ok(eng.driveMode === "rude" && eng.driveShape.curve.length === 2048, "rude character swaps the waveshaper curve");
+eng.setDriveMode("bogus");
+ok(eng.driveMode === "warm", "unknown drive character falls back to warm");
+eng.setDriveReturn(2);
+ok(eng.driveReturn.gain.value === 1, "drive return clamps safely");
+eng.setDriveReturn(0);
 
 section("multichannel music input — IN1 = ch1-2, IN2 = ch3-4 (§4)");
 ok(!!eng.in1Gain && !!eng.in2Gain, "IN1/IN2 gain nodes present");

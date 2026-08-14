@@ -1,7 +1,7 @@
 // Dubnator audio engine. Singleton wrapper around Web Audio.
 // Graph (per deck): source -> killSub -> killBass -> killMid -> killHigh -> killTop
 //                   -> 10-band geq -> 4-band parametric -> deckGain -> crossfader
-// crossfader -> masterGain -> [direct + reverbSend + echoSend] -> limiter -> destination + analyser
+// crossfader -> masterGain -> [direct + reverbSend + echoSend + dubDrive] -> limiter -> destination + analyser
 // siren -> sirenGain -> reverbSend/echoSend/master
 // samples -> sampleGain -> reverbSend/echoSend/master
 
@@ -1281,6 +1281,33 @@
       // master bus
       this.masterBus = ctx.createGain();
       this.masterSum.connect(this.masterBus); // dry
+
+      // Dub Drive — a parallel saturation return fed from the complete dry mix.
+      // The wet branch is high-passed independently, so bass fundamentals stay
+      // clean on the direct path while skanks, percussion and siren harmonics
+      // can be driven hard. Return starts muted: adding the processor never
+      // changes an existing session until ON/BURN is used.
+      this.driveInput = ctx.createGain(); this.driveInput.gain.value = 1;
+      this.driveHP = ctx.createBiquadFilter();
+      this.driveHP.type = "highpass"; this.driveHP.frequency.value = 110; this.driveHP.Q.value = 0.7;
+      this.drivePre = ctx.createGain(); this.drivePre.gain.value = 4;
+      this.driveShape = ctx.createWaveShaper();
+      this.driveShape.curve = this.makeDriveCurve("warm");
+      this.driveShape.oversample = "4x";
+      this.driveTone = ctx.createBiquadFilter();
+      this.driveTone.type = "lowpass"; this.driveTone.frequency.value = 6500; this.driveTone.Q.value = 0.7;
+      this.driveTrim = ctx.createGain(); this.driveTrim.gain.value = 0.5;
+      this.driveReturn = ctx.createGain(); this.driveReturn.gain.value = 0;
+      this.driveLim = ctx.createDynamicsCompressor();
+      this.driveLim.threshold.value = -6; this.driveLim.knee.value = 4;
+      this.driveLim.ratio.value = 8; this.driveLim.attack.value = 0.002; this.driveLim.release.value = 0.09;
+      this.driveMode = "warm";
+      this.driveAmount = 0.55;
+      this.masterSum.connect(this.driveInput);
+      this.driveInput.connect(this.driveHP).connect(this.drivePre).connect(this.driveShape)
+        .connect(this.driveTone).connect(this.driveTrim).connect(this.driveReturn)
+        .connect(this.driveLim).connect(this.masterBus);
+
       // FX limiters (post-FX, pre-master sum)
       this.reverbLim = ctx.createDynamicsCompressor();
       this.reverbLim.threshold.value = -5; this.reverbLim.knee.value = 0;
@@ -1308,6 +1335,7 @@
       this.fxAnalyser.fftSize = 2048;
       this.reverbLim.connect(this.fxAnalyser);
       this.echoLim.connect(this.fxAnalyser);
+      this.driveLim.connect(this.fxAnalyser);
 
       // master HP filter
       this.masterHP = ctx.createBiquadFilter();
@@ -1392,6 +1420,26 @@
         c[i] = Math.tanh(x * amount);
       }
       return c;
+    }
+
+    makeDriveCurve(mode = "warm") {
+      const n = 2048;
+      const curve = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        const x = (i / (n - 1)) * 2 - 1;
+        if (mode === "tape") {
+          // Rounded and almost symmetrical: dense without getting spiky.
+          curve[i] = Math.atan(x * 2.8) / Math.atan(2.8);
+        } else if (mode === "rude") {
+          // A harder console/fuzz clip for short performance accents.
+          curve[i] = Math.tanh(x * 7.5);
+        } else {
+          // Slight valve-like asymmetry adds even harmonics to skanks/sirens.
+          const bias = 0.055;
+          curve[i] = (Math.tanh((x + bias) * 2.2) - Math.tanh(bias * 2.2)) / Math.tanh(2.2);
+        }
+      }
+      return curve;
     }
 
     setCrossfade(v) {
@@ -1602,6 +1650,33 @@
       // 1 = lowpass, 2 = highpass with high feedback ceiling
       this.echoType = t;
       this.echoFilter.type = t === 2 ? "highpass" : "lowpass";
+    }
+
+    // Parallel dub saturation. Amount controls both pre-drive and compensating
+    // output trim so the useful range is musical rather than just louder.
+    setDriveAmount(amount) {
+      const value = Math.max(0, Math.min(1, Number(amount) || 0));
+      this.driveAmount = value;
+      const now = this.ctx.currentTime;
+      this.drivePre.gain.setTargetAtTime(1 + value * 15, now, 0.015);
+      this.driveTrim.gain.setTargetAtTime(Math.pow(10, (-3 - value * 9) / 20), now, 0.02);
+    }
+    setDriveTone(hz) {
+      const value = Math.max(900, Math.min(18000, Number(hz) || 6500));
+      this.driveTone.frequency.setTargetAtTime(value, this.ctx.currentTime, 0.02);
+    }
+    setDriveBassSafe(on, hz = 110) {
+      const value = on ? Math.max(40, Math.min(400, Number(hz) || 110)) : 20;
+      this.driveHP.frequency.setTargetAtTime(value, this.ctx.currentTime, 0.02);
+    }
+    setDriveMode(mode) {
+      const next = mode === "tape" || mode === "rude" ? mode : "warm";
+      this.driveMode = next;
+      this.driveShape.curve = this.makeDriveCurve(next);
+    }
+    setDriveReturn(value) {
+      const level = Math.max(0, Math.min(1, Number(value) || 0));
+      this.driveReturn.gain.setTargetAtTime(level, this.ctx.currentTime, 0.012);
     }
 
     // DubFilter

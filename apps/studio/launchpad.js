@@ -99,6 +99,16 @@
     "reverb.bpq": "cyan",
     "reverb.bp": "cyan",
     "reverb.freeze": "magenta",
+    "drive.amount": "red",
+    "drive.tone": "yellow",
+    "drive.mix": "orange",
+    "drive.safe": "cyan",
+    "drive.on": "orange",
+    "drive.burn": "red",
+    "drive.safeon": "cyan",
+    "drive.warm": "orange",
+    "drive.tape": "yellow",
+    "drive.rude": "red",
   };
 
   const METER_CONTROL_IDS = [
@@ -258,6 +268,7 @@
     ]),
     page("SIR FX", "siren", [
       "siren.pan", "siren.bits", "siren.sr", "siren.preset",
+      "drive.amount", "drive.tone", "drive.mix", "drive.safe",
     ], [
       "siren.trigger", "siren.prev", "siren.next",
     ], "magenta", true),
@@ -305,6 +316,8 @@
       "xfade.curve.power", "xfade.curve.linear", "xfade.curve.sharp",
       "recorder.toggle", "recorder.format",
       "system.rewindstop", "system.line", "system.multi",
+      "drive.warm", "drive.tape", "drive.rude", "drive.safeon",
+      "drive.on", "drive.burn",
     ]),
     page("ISO ADV", "iso", [
       "kill.sub.freq", "kill.bass.freq", "kill.mid.freq", "kill.high.freq",
